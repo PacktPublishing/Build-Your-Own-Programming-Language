@@ -1,0 +1,11 @@
+procedure main(argv)
+   simple := simple()
+   yyin := open(argv[1])
+   while i := yylex() do
+      write(yytext, ": ", i)
+end
+class simple()
+   method lexErr(s)
+      stop(s, ": ", yytext)
+   end
+end

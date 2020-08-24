@@ -1,0 +1,40 @@
+global yylineno, yylineno, yylval
+procedure main(argv)
+   j0 := j0()
+   parser := parser(257,258,259,260,261,262,263,264,265,266,
+                    267,268,269,270,273,274,275,
+                    276,277,278,280,
+                    298,300,301,
+                    302,303,304,306,
+                    307,256)
+   yyin := open(argv[1]) | stop("usage: simple2 filename")
+   yylineno := 1
+   while i := yylex() do
+      write(yytext, ":",yylval.lineno, " ", i)
+end
+class j0()
+   method lexErr(s)
+      stop(s, ": ", yytext) 
+   end
+   method scan(cat)
+      yylval := token(cat, yytext, yylineno)
+      return cat
+   end
+   method whitespace()
+   end
+   method newline()
+      yylineno +:= 1
+   end
+   method comment()
+   end
+   method ord(s)
+      return proc("ord",0)(s[1])
+   end
+end
+record token(cat, text, lineno)
+record parser(BREAK,PUBLIC,DOUBLE,ELSE,FOR,IF,INT,RETURN,VOID,WHILE,
+              IDENTIFIER,CLASSNAME,CLASS,STATIC,STRING,BOOL,INTLIT,
+              DOUBLELIT,STRINGLIT,BOOLLIT,NULLVAL,
+              LESSTHANOREQUAL,GREATERTHANOREQUAL,ISEQUALTO,
+              NOTEQUALTO,LOGICALAND,LOGICALOR,INCREMENT,
+              DECREMENT,YYERRCODE)
