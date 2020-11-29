@@ -1,0 +1,60 @@
+global yylineno, yycolno, yylval, parser
+procedure main(argv)
+   j0 := j0()
+   parser := Parser()
+   yyin := open(argv[1]) | stop("usage: j0 filename")
+   yylineno := yycolno := 1
+   if yyparse() = 0 then
+      write("no errors")
+end
+class j0()
+   method lexErr(s)
+      stop(s, ": ", yytext) 
+   end
+   method scan(cat)
+      yylval := token(cat, yytext, yylineno, yycolno)
+      yycolno +:= *yytext
+      return cat
+   end
+   method whitespace()
+      yycolno +:= *yytext
+   end
+   method newline()
+      yylineno +:= 1; yycolno := 1
+   end
+   method comment()
+      yytext ? {
+         while tab(find("\n")+1) do newline()
+         yycolno +:= *tab(0)
+      }
+   end
+   method ord(s)
+      return proc("ord",0)(s[1])
+   end
+end
+class token(cat, text, lineno, colno, ival, dval, sval)
+   method deEscape(sin)
+      local sout := ""
+      sin := sin[2:-1]
+      sin ? {
+         while c := move(1) do {
+            if c == "\\" then {
+               if not (c := move(1)) then
+                  j0.lexErr("malformed string literal")
+               else case c of {
+                  "t":{ sout ||:= "\t" }
+                  "n":{ sout ||:= "\n" }
+                  }
+            }
+            else sout ||:= c
+         }
+      }
+      return sout
+   end
+initially
+   case cat of {
+     parser.INTLIT:    { ival := integer(text) }
+     parser.DOUBLELIT: { dval := real(text) }
+     parser.STRINGLIT: { sval := deEscape(text) }
+   }
+end

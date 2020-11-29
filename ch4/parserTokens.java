@@ -1,0 +1,32 @@
+package ch4;
+public interface parserTokens {
+public final static short BREAK=257;
+public final static short DOUBLE=258;
+public final static short ELSE=259;
+public final static short FOR=260;
+public final static short IF=261;
+public final static short INT=262;
+public final static short RETURN=263;
+public final static short VOID=264;
+public final static short WHILE=265;
+public final static short IDENTIFIER=266;
+public final static short CLASSNAME=267;
+public final static short CLASS=268;
+public final static short STRING=269;
+public final static short BOOL=270;
+public final static short INTLIT=271;
+public final static short DOUBLELIT=272;
+public final static short STRINGLIT=273;
+public final static short BOOLLIT=274;
+public final static short NULLVAL=275;
+public final static short LESSTHANOREQUAL=276;
+public final static short GREATERTHANOREQUAL=277;
+public final static short ISEQUALTO=278;
+public final static short NOTEQUALTO=279;
+public final static short LOGICALAND=280;
+public final static short LOGICALOR=281;
+public final static short INCREMENT=282;
+public final static short DECREMENT=283;
+public final static short PUBLIC=284;
+public final static short STATIC=285;
+}

@@ -1,0 +1,13 @@
+procedure main(argv)
+   trivial := trivial()
+   yyin := open(argv[1])
+   if yyparse() = 0 then write("No errors")
+end
+class trivial()
+   method synErr(s)
+      stop(s, ": ", yytext)
+   end
+end
+procedure yyerror(s)
+    stop(s)
+end
