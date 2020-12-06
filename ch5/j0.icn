@@ -1,0 +1,38 @@
+global yylineno, yylval, parser
+procedure main(argv)
+   j0 := j0()
+   serial := serial()
+   parser := Parser()
+   yyin := open(argv[1]) | stop("usage: j0 filename")
+   yylineno := 1
+   if yyparse() = 0 then
+      write("no errors")
+end
+class j0()
+   method lexErr(s)
+      stop(s, ": ", yytext) 
+   end
+   method scan(cat)
+      yylval := tree("token", cat, token(cat, yytext, yylineno))
+      return cat
+   end
+   method whitespace()
+   end
+   method newline()
+      yylineno +:= 1
+   end
+   method comment()
+      yytext ? {
+         while tab(find("\n")+1) do newline()
+      }
+   end
+   method ord(s)
+      return proc("ord",0)(s[1])
+   end
+   method print(root)
+      root.print()
+   end
+   method node(s,r,p[])
+      return tree ! ([s,r] ||| p)
+   end
+end

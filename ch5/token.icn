@@ -1,0 +1,26 @@
+class token(cat, text, lineno, colno, ival, dval, sval)
+   method deEscape(sin)
+      local sout := ""
+      sin := sin[2:-1]
+      sin ? {
+         while c := move(1) do {
+            if c == "\\" then {
+               if not (c := move(1)) then
+                  j0.lexErr("malformed string literal")
+               else case c of {
+                  "t":{ sout ||:= "\t" }
+                  "n":{ sout ||:= "\n" }
+                  }
+            }
+            else sout ||:= c
+         }
+      }
+      return sout
+   end
+initially
+   case cat of {
+     parser.INTLIT:    { ival := integer(text) }
+     parser.DOUBLELIT: { dval := real(text) }
+     parser.STRINGLIT: { sval := deEscape(text) }
+   }
+end

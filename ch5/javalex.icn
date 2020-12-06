@@ -1,0 +1,6955 @@
+#
+# ulex skeleton by Katrina Ray. hacked by jeffery.
+# do not edit by hand, this file is machine-generated
+#
+
+record edge(symbol, destinations)
+record anode(label, rulenum, edges, epsilon, dot)
+record automata(start, states, accepting)
+
+global yychar, yytext, yyin, yyleng
+
+#
+# yyulex reads from a specified input file and calls the simulate
+# function repeatedly on smaller and smaller pieces of the input until
+# it finds a match. It reports what parts of the input
+# it could parse and what rule accepted the string.
+#
+
+global stringseq
+
+procedure yyulex(aut)
+local rulenum, readfrom, position, less, currstring, getln
+
+initial {
+   if /yyin then yyin := &input
+   readfrom := yyin
+
+   stringseq := read(readfrom) || "\n"
+
+   while getln := read(readfrom) do
+      stringseq ||:= getln || "\n"
+
+   close(readfrom)
+   }
+
+   repeat {
+
+      if stringseq == "" then {
+         yychar := -1
+         fail
+         }
+
+      s := stringseq
+      while *s > 0 do {
+         if rulenum := (0 < simulate(aut, s)) then break
+         s := s[1:-1]
+         }
+      if \rulenum > 0 then {
+         yytext := s; yyleng := *s
+         stringseq := stringseq[yyleng+1:0]
+         if yychar := (\semantic_action)[rulenum] () then return yychar
+         }
+      else { # didn't match nothin', copy to stdout and keep going
+         writes(stringseq[1])
+         stringseq := stringseq[2:0]
+         }
+      }
+end
+
+#
+# simulate(automata, word) determines whether or not the word
+# would be accepted by the given automata. It gets the possible
+# destinations at each symbol of the string and then adds on wherever it
+# could also get if we use any epsilon transitions out of those states.
+# Then the list of accepting states is compared to the reachable set
+# of states to determine if the word was accepted and by which rule.
+#
+procedure simulate(myaut, word)
+local first, currstates, acceptcheck, currsymbol, build, rv
+   currstates := list(0) # should be set()
+   put(currstates, myaut.start) # insert(currstates, myaut.start)
+   acceptcheck := copy(myaut.accepting)
+   currsymbol := word
+   while *currsymbol > 0 do {
+      currstates := getdestinations(currstates, currsymbol)
+      if *currstates = 0 then
+         return 0
+      currsymbol := currsymbol[2:0]
+
+      # add states reachable through epsilon transitions
+      build := copy(currstates)
+      while *build > 0 do {
+         current := pop(build)
+         yyunionin(currstates, current.epsilon)
+         yyunionin(build, current.epsilon)
+         }
+      }
+
+   while *acceptcheck > 0 do {
+      value1 := pop(acceptcheck)
+      check2 := copy(currstates)
+      while *check2 > 0 do {
+         value2 := pop(check2)
+         if value1.label = value2.label then {
+            if /rv | rv > value1.rulenum then
+               rv := value1.rulenum
+            }
+         }
+      }
+   if \yydebug>0 then write("simulate() returns ", image(\rv)|0)
+   return \rv | 0
+end
+
+# like |||:= except no duplicates. Destructive of L1 but not L2
+procedure yyunionin(L1, L2)
+   t1 := table()
+   every x := !L1 do {
+      t1[x.label] := x
+      }
+   every x := !L2 do {
+      if /t1[x.label] then {
+         t1[x.label] := x
+         put(L1, x)
+         }
+      }
+end
+
+#
+# getdestinations uses the current set of states and
+# simulates one step of automata computation on the given
+# string and returns the resulting set of destinations
+#
+procedure getdestinations(currstates, currsymbol)
+local result, current, buildresult
+
+   result := list(0)
+   if *currstates ~= 0 then {
+
+      # add states reachable through epsilon transitions
+      buildresult := copy(currstates)
+      while *buildresult > 0 do {
+         current := pop(buildresult)
+         yyunionin(currstates, current.epsilon)
+         yyunionin(buildresult, current.epsilon)
+         }
+
+      buildresult := copy(currstates)
+      while *buildresult > 0 do
+          yyunionin(result, reach(pop(buildresult), currsymbol))
+      buildresult := copy(result)
+      while *buildresult > 0 do {
+         current := pop(buildresult)
+         yyunionin(result, current.epsilon)
+         yyunionin(buildresult, current.epsilon)
+         }
+    }
+    return result
+end
+
+#
+# reach returns the list of states that can be reached
+# on character symbol from the state state.
+#
+procedure reach(state, symbol)
+local edgeset, answer, edgesymbol, bound1, bound2, curredge
+
+   edgeset := copy(state.edges)
+   answer := list(0)
+
+   while *edgeset > 0 do {
+      curredge := pop(edgeset)
+      edgesymbol := copy(curredge.symbol)
+      if type(edgesymbol) == "cset" then {
+         if any(edgesymbol, symbol[1]) then {
+            yyunionin(answer, curredge.destinations)
+            }
+         }
+      else {
+      if (edgesymbol[1] == symbol[1] ~== "[") |
+         (edgesymbol == symbol[1] == "[") then # sometimes a [ is just a [
+            yyunionin(answer, curredge.destinations)
+
+      else if edgesymbol[1] == "\\" then {
+         if (edgesymbol[2] == "n") & (symbol[1] == "\n") then
+            yyunionin(answer, curredge.destinations)
+         else if (edgesymbol[2] == "t") & (symbol[1] == "\t") then
+            yyunionin(answer, curredge.destinations)
+         else if (edgesymbol[1] == "r") & (symbol[1] == "\r") then
+            yyunionin(answer, curredge.destinations)
+         else if (edgesymbol[1] == "f") & (symbol[1] == "\f") then
+            yyunionin(answer, curredge.destinations)
+         else if (edgesymbol[1] == "\\") & (symbol[1] == "\\") then
+            yyunionin(answer, curredge.destinations)
+         # should handle all escapes here, and error on bogus ones
+         else if edgesymbol[2] == symbol[1] then
+            yyunionin(answer, curredge.destinations)
+         } # escape
+
+      }
+      } # while edgeset > 0
+
+   yyunionin(answer, state.dot)
+   return answer
+end
+
+# "recset" == "regular expression cset"
+procedure csetfromrecset(recset)
+local rv, lastchar, origcset := recset
+
+   if not (recset[1]=="[" & recset[-1]=="]") then
+      stop("malformed recset ", image(recset))
+   recset := recset[2:-1]
+
+   if recset[1]=="^" then { # not in this cset, subtract from &cset
+      rv := &cset -- csetfromrecset("["||recset[2:0]||"]")
+      return rv
+      }
+   # positive cset construction
+   rv := ''
+   while *recset>0 do {
+
+      if recset[1] == "-" & \lastchar & *recset>1 then
+         genrangefrom := lastchar
+      else {
+         # did not trigger a new range. Process one char
+
+         if recset[1] == "\\" then { # escape
+            recset := recset[2:0]
+            case recset[1] of {
+               "n":  recset[1] := "\n"
+               "t":  recset[1] := "\t"
+               "r":  recset[1] := "\r"
+               "f":  recset[1] := "\f"
+               "\\": recset[1] := "\\"
+               # should handle all escapes here, and error on bogus ones
+               default: stop("unrecognized escape")
+               }
+            }
+
+         rv ++:= recset[1]
+
+         if \genrangefrom then { #if we have a pending range
+            ord1 := ord(genrangefrom)
+             ord2 := ord(recset[1])
+             while ord1 < ord2 do {
+               rv ++:= char(ord1)
+               ord1 +:= 1
+               }
+            genrangefrom := &null
+            }
+         lastchar := recset[1]
+
+          }
+       recset := recset[2:0]
+       }
+
+   return rv
+end
+
+procedure printautomaton(a)
+   write("Automaton:")
+   write("start: ", image(a.start.label),
+         " for rulenum ", image(a.start.rulenum))
+   write("states:")
+   every printstate(!a.states)
+   writes("accepting: ")
+   every writes((!a.accepting).label, " ")
+   write()
+end
+
+procedure printstate(state)
+   write("state ", state.label, " is for rule #", state.rulenum)
+   if (*state.edges)>0 then {
+      writes("\tedges: "); every printedge(!state.edges); write()
+      }
+   if *state.epsilon>0 then {
+      writes("\tepsilon: ")
+      every writes((!state.epsilon).label, " "); write()
+      }
+   if (*state.dot)>0 then {
+      writes("\tdot: ")
+      every writes((!state.dot).label, " "); write()
+      }
+end
+
+procedure printedge(edge)
+   writes(image(edge.symbol), " -> ")
+   every writes((!edge.destinations).label)
+   writes("; ")
+end
+
+procedure printstates(states)
+local statecopy, current
+
+   write("printstates size ", *states, " in entity ", image(states))
+   statecopy := copy(states)
+
+   while *statecopy > 1 do {
+      current := pop(statecopy)
+      write(current.label, ", ")
+      }
+
+   if *statecopy > 0 then {
+      current := pop(statecopy)
+      write(current.label)
+      }
+    else write("state list is empty")
+end
+global semantic_action
+
+procedure yylex()
+static myautomata
+local currstate, state2, tempedge
+
+   myautomata := automata()
+
+   myautomata.states := []
+   myautomata.accepting := []
+   put(myautomata.states, currstate := anode(0, 0, [], [], []))
+   myautomata.start := currstate
+
+   put(myautomata.states, currstate := anode(1, 0, [], [], []))
+
+   put(myautomata.states, currstate := anode(2, 0, [], [], []))
+
+   put(myautomata.states, currstate := anode(3, 0, [], [], []))
+
+   put(myautomata.states, currstate := anode(4, 0, [], [], []))
+
+   put(myautomata.states, currstate := anode(5, 0, [], [], []))
+
+   put(myautomata.states, currstate := anode(6, 0, [], [], []))
+
+   put(myautomata.states, currstate := anode(7, 0, [], [], []))
+
+   put(myautomata.states, currstate := anode(8, 0, [], [], []))
+
+   put(myautomata.states, currstate := anode(9, 0, [], [], []))
+
+   put(myautomata.states, currstate := anode(10, 0, [], [], []))
+
+   put(myautomata.states, currstate := anode(11, 0, [], [], []))
+
+   put(myautomata.states, currstate := anode(12, 0, [], [], []))
+
+   put(myautomata.states, currstate := anode(13, 0, [], [], []))
+
+   put(myautomata.states, currstate := anode(14, 0, [], [], []))
+
+   put(myautomata.states, currstate := anode(15, 0, [], [], []))
+
+   put(myautomata.states, currstate := anode(16, 0, [], [], []))
+
+   put(myautomata.states, currstate := anode(17, 0, [], [], []))
+
+   put(myautomata.states, currstate := anode(18, 0, [], [], []))
+
+   put(myautomata.states, currstate := anode(19, 0, [], [], []))
+
+   put(myautomata.states, currstate := anode(20, 0, [], [], []))
+
+   put(myautomata.states, currstate := anode(21, 0, [], [], []))
+
+   put(myautomata.states, currstate := anode(22, 0, [], [], []))
+
+   put(myautomata.states, currstate := anode(23, 0, [], [], []))
+
+   put(myautomata.states, currstate := anode(24, 0, [], [], []))
+
+   put(myautomata.states, currstate := anode(25, 0, [], [], []))
+
+   put(myautomata.states, currstate := anode(26, 0, [], [], []))
+
+   put(myautomata.states, currstate := anode(27, 0, [], [], []))
+
+   put(myautomata.states, currstate := anode(28, 0, [], [], []))
+
+   put(myautomata.states, currstate := anode(29, 0, [], [], []))
+
+   put(myautomata.states, currstate := anode(30, 0, [], [], []))
+
+   put(myautomata.states, currstate := anode(31, 0, [], [], []))
+
+   put(myautomata.states, currstate := anode(32, 0, [], [], []))
+
+   put(myautomata.states, currstate := anode(33, 0, [], [], []))
+
+   put(myautomata.states, currstate := anode(34, 0, [], [], []))
+
+   put(myautomata.states, currstate := anode(35, 0, [], [], []))
+
+   put(myautomata.states, currstate := anode(36, 0, [], [], []))
+
+   put(myautomata.states, currstate := anode(37, 0, [], [], []))
+
+   put(myautomata.states, currstate := anode(38, 0, [], [], []))
+
+   put(myautomata.states, currstate := anode(39, 0, [], [], []))
+
+   put(myautomata.states, currstate := anode(40, 0, [], [], []))
+
+   put(myautomata.states, currstate := anode(41, 0, [], [], []))
+
+   put(myautomata.states, currstate := anode(42, 0, [], [], []))
+
+   put(myautomata.states, currstate := anode(43, 0, [], [], []))
+
+   put(myautomata.states, currstate := anode(44, 0, [], [], []))
+
+   put(myautomata.states, currstate := anode(45, 0, [], [], []))
+
+   put(myautomata.states, currstate := anode(46, 0, [], [], []))
+
+   put(myautomata.states, currstate := anode(47, 0, [], [], []))
+
+   put(myautomata.states, currstate := anode(48, 0, [], [], []))
+
+   put(myautomata.states, currstate := anode(49, 0, [], [], []))
+
+   put(myautomata.states, currstate := anode(50, 0, [], [], []))
+
+   put(myautomata.states, currstate := anode(51, 0, [], [], []))
+
+   put(myautomata.states, currstate := anode(52, 0, [], [], []))
+
+   put(myautomata.states, currstate := anode(53, 1, [], [], []))
+
+   put(myautomata.states, currstate := anode(54, 1, [], [], []))
+
+   put(myautomata.states, currstate := anode(55, 1, [], [], []))
+
+   put(myautomata.states, currstate := anode(56, 1, [], [], []))
+
+   put(myautomata.states, currstate := anode(57, 1, [], [], []))
+
+   put(myautomata.states, currstate := anode(58, 1, [], [], []))
+
+   put(myautomata.states, currstate := anode(59, 1, [], [], []))
+
+   put(myautomata.states, currstate := anode(60, 1, [], [], []))
+
+   put(myautomata.states, currstate := anode(61, 1, [], [], []))
+
+   put(myautomata.states, currstate := anode(62, 1, [], [], []))
+
+   put(myautomata.states, currstate := anode(63, 1, [], [], []))
+
+   put(myautomata.states, currstate := anode(64, 1, [], [], []))
+
+   put(myautomata.states, currstate := anode(65, 1, [], [], []))
+
+   put(myautomata.states, currstate := anode(66, 1, [], [], []))
+   put(myautomata.accepting, currstate)
+
+   put(myautomata.states, currstate := anode(67, 2, [], [], []))
+
+   put(myautomata.states, currstate := anode(68, 2, [], [], []))
+
+   put(myautomata.states, currstate := anode(69, 2, [], [], []))
+
+   put(myautomata.states, currstate := anode(70, 2, [], [], []))
+
+   put(myautomata.states, currstate := anode(71, 2, [], [], []))
+
+   put(myautomata.states, currstate := anode(72, 2, [], [], []))
+
+   put(myautomata.states, currstate := anode(73, 2, [], [], []))
+
+   put(myautomata.states, currstate := anode(74, 2, [], [], []))
+
+   put(myautomata.states, currstate := anode(75, 2, [], [], []))
+   put(myautomata.accepting, currstate)
+
+   put(myautomata.states, currstate := anode(76, 3, [], [], []))
+
+   put(myautomata.states, currstate := anode(77, 3, [], [], []))
+   put(myautomata.accepting, currstate)
+
+   put(myautomata.states, currstate := anode(78, 4, [], [], []))
+
+   put(myautomata.states, currstate := anode(79, 4, [], [], []))
+   put(myautomata.accepting, currstate)
+
+   put(myautomata.states, currstate := anode(80, 5, [], [], []))
+
+   put(myautomata.states, currstate := anode(81, 5, [], [], []))
+
+   put(myautomata.states, currstate := anode(82, 5, [], [], []))
+
+   put(myautomata.states, currstate := anode(83, 5, [], [], []))
+
+   put(myautomata.states, currstate := anode(84, 5, [], [], []))
+
+   put(myautomata.states, currstate := anode(85, 5, [], [], []))
+   put(myautomata.accepting, currstate)
+
+   put(myautomata.states, currstate := anode(86, 6, [], [], []))
+
+   put(myautomata.states, currstate := anode(87, 6, [], [], []))
+
+   put(myautomata.states, currstate := anode(88, 6, [], [], []))
+
+   put(myautomata.states, currstate := anode(89, 6, [], [], []))
+
+   put(myautomata.states, currstate := anode(90, 6, [], [], []))
+
+   put(myautomata.states, currstate := anode(91, 6, [], [], []))
+
+   put(myautomata.states, currstate := anode(92, 6, [], [], []))
+   put(myautomata.accepting, currstate)
+
+   put(myautomata.states, currstate := anode(93, 7, [], [], []))
+
+   put(myautomata.states, currstate := anode(94, 7, [], [], []))
+
+   put(myautomata.states, currstate := anode(95, 7, [], [], []))
+
+   put(myautomata.states, currstate := anode(96, 7, [], [], []))
+
+   put(myautomata.states, currstate := anode(97, 7, [], [], []))
+   put(myautomata.accepting, currstate)
+
+   put(myautomata.states, currstate := anode(98, 8, [], [], []))
+
+   put(myautomata.states, currstate := anode(99, 8, [], [], []))
+
+   put(myautomata.states, currstate := anode(100, 8, [], [], []))
+
+   put(myautomata.states, currstate := anode(101, 8, [], [], []))
+
+   put(myautomata.states, currstate := anode(102, 8, [], [], []))
+
+   put(myautomata.states, currstate := anode(103, 8, [], [], []))
+   put(myautomata.accepting, currstate)
+
+   put(myautomata.states, currstate := anode(104, 9, [], [], []))
+
+   put(myautomata.states, currstate := anode(105, 9, [], [], []))
+
+   put(myautomata.states, currstate := anode(106, 9, [], [], []))
+
+   put(myautomata.states, currstate := anode(107, 9, [], [], []))
+   put(myautomata.accepting, currstate)
+
+   put(myautomata.states, currstate := anode(108, 10, [], [], []))
+
+   put(myautomata.states, currstate := anode(109, 10, [], [], []))
+
+   put(myautomata.states, currstate := anode(110, 10, [], [], []))
+   put(myautomata.accepting, currstate)
+
+   put(myautomata.states, currstate := anode(111, 11, [], [], []))
+
+   put(myautomata.states, currstate := anode(112, 11, [], [], []))
+
+   put(myautomata.states, currstate := anode(113, 11, [], [], []))
+
+   put(myautomata.states, currstate := anode(114, 11, [], [], []))
+   put(myautomata.accepting, currstate)
+
+   put(myautomata.states, currstate := anode(115, 12, [], [], []))
+
+   put(myautomata.states, currstate := anode(116, 12, [], [], []))
+
+   put(myautomata.states, currstate := anode(117, 12, [], [], []))
+
+   put(myautomata.states, currstate := anode(118, 12, [], [], []))
+
+   put(myautomata.states, currstate := anode(119, 12, [], [], []))
+   put(myautomata.accepting, currstate)
+
+   put(myautomata.states, currstate := anode(120, 13, [], [], []))
+
+   put(myautomata.states, currstate := anode(121, 13, [], [], []))
+
+   put(myautomata.states, currstate := anode(122, 13, [], [], []))
+
+   put(myautomata.states, currstate := anode(123, 13, [], [], []))
+
+   put(myautomata.states, currstate := anode(124, 13, [], [], []))
+
+   put(myautomata.states, currstate := anode(125, 13, [], [], []))
+
+   put(myautomata.states, currstate := anode(126, 13, [], [], []))
+   put(myautomata.accepting, currstate)
+
+   put(myautomata.states, currstate := anode(127, 14, [], [], []))
+
+   put(myautomata.states, currstate := anode(128, 14, [], [], []))
+
+   put(myautomata.states, currstate := anode(129, 14, [], [], []))
+
+   put(myautomata.states, currstate := anode(130, 14, [], [], []))
+
+   put(myautomata.states, currstate := anode(131, 14, [], [], []))
+
+   put(myautomata.states, currstate := anode(132, 14, [], [], []))
+
+   put(myautomata.states, currstate := anode(133, 14, [], [], []))
+   put(myautomata.accepting, currstate)
+
+   put(myautomata.states, currstate := anode(134, 15, [], [], []))
+
+   put(myautomata.states, currstate := anode(135, 15, [], [], []))
+
+   put(myautomata.states, currstate := anode(136, 15, [], [], []))
+
+   put(myautomata.states, currstate := anode(137, 15, [], [], []))
+
+   put(myautomata.states, currstate := anode(138, 15, [], [], []))
+
+   put(myautomata.states, currstate := anode(139, 15, [], [], []))
+
+   put(myautomata.states, currstate := anode(140, 15, [], [], []))
+   put(myautomata.accepting, currstate)
+
+   put(myautomata.states, currstate := anode(141, 16, [], [], []))
+
+   put(myautomata.states, currstate := anode(142, 16, [], [], []))
+
+   put(myautomata.states, currstate := anode(143, 16, [], [], []))
+
+   put(myautomata.states, currstate := anode(144, 16, [], [], []))
+
+   put(myautomata.states, currstate := anode(145, 16, [], [], []))
+
+   put(myautomata.states, currstate := anode(146, 16, [], [], []))
+
+   put(myautomata.states, currstate := anode(147, 16, [], [], []))
+   put(myautomata.accepting, currstate)
+
+   put(myautomata.states, currstate := anode(148, 17, [], [], []))
+
+   put(myautomata.states, currstate := anode(149, 17, [], [], []))
+
+   put(myautomata.states, currstate := anode(150, 17, [], [], []))
+
+   put(myautomata.states, currstate := anode(151, 17, [], [], []))
+
+   put(myautomata.states, currstate := anode(152, 17, [], [], []))
+   put(myautomata.accepting, currstate)
+
+   put(myautomata.states, currstate := anode(153, 18, [], [], []))
+
+   put(myautomata.states, currstate := anode(154, 18, [], [], []))
+
+   put(myautomata.states, currstate := anode(155, 18, [], [], []))
+
+   put(myautomata.states, currstate := anode(156, 18, [], [], []))
+
+   put(myautomata.states, currstate := anode(157, 18, [], [], []))
+   put(myautomata.accepting, currstate)
+
+   put(myautomata.states, currstate := anode(158, 19, [], [], []))
+
+   put(myautomata.states, currstate := anode(159, 19, [], [], []))
+
+   put(myautomata.states, currstate := anode(160, 19, [], [], []))
+
+   put(myautomata.states, currstate := anode(161, 19, [], [], []))
+
+   put(myautomata.states, currstate := anode(162, 19, [], [], []))
+   put(myautomata.accepting, currstate)
+
+   put(myautomata.states, currstate := anode(163, 20, [], [], []))
+
+   put(myautomata.states, currstate := anode(164, 20, [], [], []))
+
+   put(myautomata.states, currstate := anode(165, 20, [], [], []))
+
+   put(myautomata.states, currstate := anode(166, 20, [], [], []))
+
+   put(myautomata.states, currstate := anode(167, 20, [], [], []))
+
+   put(myautomata.states, currstate := anode(168, 20, [], [], []))
+   put(myautomata.accepting, currstate)
+
+   put(myautomata.states, currstate := anode(169, 21, [], [], []))
+
+   put(myautomata.states, currstate := anode(170, 21, [], [], []))
+
+   put(myautomata.states, currstate := anode(171, 21, [], [], []))
+
+   put(myautomata.states, currstate := anode(172, 21, [], [], []))
+
+   put(myautomata.states, currstate := anode(173, 21, [], [], []))
+
+   put(myautomata.states, currstate := anode(174, 21, [], [], []))
+   put(myautomata.accepting, currstate)
+
+   put(myautomata.states, currstate := anode(175, 22, [], [], []))
+
+   put(myautomata.states, currstate := anode(176, 22, [], [], []))
+   put(myautomata.accepting, currstate)
+
+   put(myautomata.states, currstate := anode(177, 23, [], [], []))
+
+   put(myautomata.states, currstate := anode(178, 23, [], [], []))
+   put(myautomata.accepting, currstate)
+
+   put(myautomata.states, currstate := anode(179, 24, [], [], []))
+
+   put(myautomata.states, currstate := anode(180, 24, [], [], []))
+   put(myautomata.accepting, currstate)
+
+   put(myautomata.states, currstate := anode(181, 25, [], [], []))
+
+   put(myautomata.states, currstate := anode(182, 25, [], [], []))
+   put(myautomata.accepting, currstate)
+
+   put(myautomata.states, currstate := anode(183, 26, [], [], []))
+
+   put(myautomata.states, currstate := anode(184, 26, [], [], []))
+   put(myautomata.accepting, currstate)
+
+   put(myautomata.states, currstate := anode(185, 27, [], [], []))
+
+   put(myautomata.states, currstate := anode(186, 27, [], [], []))
+   put(myautomata.accepting, currstate)
+
+   put(myautomata.states, currstate := anode(187, 28, [], [], []))
+
+   put(myautomata.states, currstate := anode(188, 28, [], [], []))
+   put(myautomata.accepting, currstate)
+
+   put(myautomata.states, currstate := anode(189, 29, [], [], []))
+
+   put(myautomata.states, currstate := anode(190, 29, [], [], []))
+   put(myautomata.accepting, currstate)
+
+   put(myautomata.states, currstate := anode(191, 30, [], [], []))
+
+   put(myautomata.states, currstate := anode(192, 30, [], [], []))
+   put(myautomata.accepting, currstate)
+
+   put(myautomata.states, currstate := anode(193, 31, [], [], []))
+
+   put(myautomata.states, currstate := anode(194, 31, [], [], []))
+   put(myautomata.accepting, currstate)
+
+   put(myautomata.states, currstate := anode(195, 32, [], [], []))
+
+   put(myautomata.states, currstate := anode(196, 32, [], [], []))
+   put(myautomata.accepting, currstate)
+
+   put(myautomata.states, currstate := anode(197, 33, [], [], []))
+
+   put(myautomata.states, currstate := anode(198, 33, [], [], []))
+   put(myautomata.accepting, currstate)
+
+   put(myautomata.states, currstate := anode(199, 34, [], [], []))
+
+   put(myautomata.states, currstate := anode(200, 34, [], [], []))
+   put(myautomata.accepting, currstate)
+
+   put(myautomata.states, currstate := anode(201, 35, [], [], []))
+
+   put(myautomata.states, currstate := anode(202, 35, [], [], []))
+   put(myautomata.accepting, currstate)
+
+   put(myautomata.states, currstate := anode(203, 36, [], [], []))
+
+   put(myautomata.states, currstate := anode(204, 36, [], [], []))
+   put(myautomata.accepting, currstate)
+
+   put(myautomata.states, currstate := anode(205, 37, [], [], []))
+
+   put(myautomata.states, currstate := anode(206, 37, [], [], []))
+
+   put(myautomata.states, currstate := anode(207, 37, [], [], []))
+   put(myautomata.accepting, currstate)
+
+   put(myautomata.states, currstate := anode(208, 38, [], [], []))
+
+   put(myautomata.states, currstate := anode(209, 38, [], [], []))
+   put(myautomata.accepting, currstate)
+
+   put(myautomata.states, currstate := anode(210, 39, [], [], []))
+
+   put(myautomata.states, currstate := anode(211, 39, [], [], []))
+
+   put(myautomata.states, currstate := anode(212, 39, [], [], []))
+   put(myautomata.accepting, currstate)
+
+   put(myautomata.states, currstate := anode(213, 40, [], [], []))
+
+   put(myautomata.states, currstate := anode(214, 40, [], [], []))
+
+   put(myautomata.states, currstate := anode(215, 40, [], [], []))
+   put(myautomata.accepting, currstate)
+
+   put(myautomata.states, currstate := anode(216, 41, [], [], []))
+
+   put(myautomata.states, currstate := anode(217, 41, [], [], []))
+
+   put(myautomata.states, currstate := anode(218, 41, [], [], []))
+   put(myautomata.accepting, currstate)
+
+   put(myautomata.states, currstate := anode(219, 42, [], [], []))
+
+   put(myautomata.states, currstate := anode(220, 42, [], [], []))
+
+   put(myautomata.states, currstate := anode(221, 42, [], [], []))
+   put(myautomata.accepting, currstate)
+
+   put(myautomata.states, currstate := anode(222, 43, [], [], []))
+
+   put(myautomata.states, currstate := anode(223, 43, [], [], []))
+
+   put(myautomata.states, currstate := anode(224, 43, [], [], []))
+   put(myautomata.accepting, currstate)
+
+   put(myautomata.states, currstate := anode(225, 44, [], [], []))
+
+   put(myautomata.states, currstate := anode(226, 44, [], [], []))
+   put(myautomata.accepting, currstate)
+
+   put(myautomata.states, currstate := anode(227, 45, [], [], []))
+
+   put(myautomata.states, currstate := anode(228, 45, [], [], []))
+
+   put(myautomata.states, currstate := anode(229, 45, [], [], []))
+   put(myautomata.accepting, currstate)
+
+   put(myautomata.states, currstate := anode(230, 46, [], [], []))
+
+   put(myautomata.states, currstate := anode(231, 46, [], [], []))
+
+   put(myautomata.states, currstate := anode(232, 46, [], [], []))
+   put(myautomata.accepting, currstate)
+
+   put(myautomata.states, currstate := anode(233, 47, [], [], []))
+
+   put(myautomata.states, currstate := anode(234, 47, [], [], []))
+   put(myautomata.accepting, currstate)
+
+   put(myautomata.states, currstate := anode(235, 48, [], [], []))
+
+   put(myautomata.states, currstate := anode(236, 48, [], [], []))
+   put(myautomata.accepting, currstate)
+
+   put(myautomata.states, currstate := anode(237, 49, [], [], []))
+
+   put(myautomata.states, currstate := anode(238, 49, [], [], []))
+
+   put(myautomata.states, currstate := anode(239, 49, [], [], []))
+   put(myautomata.accepting, currstate)
+
+   put(myautomata.states, currstate := anode(240, 49, [], [], []))
+   put(myautomata.accepting, currstate)
+
+   put(myautomata.states, currstate := anode(241, 50, [], [], []))
+
+   put(myautomata.states, currstate := anode(242, 50, [], [], []))
+   put(myautomata.accepting, currstate)
+
+   put(myautomata.states, currstate := anode(243, 51, [], [], []))
+
+   put(myautomata.states, currstate := anode(244, 51, [], [], []))
+
+   put(myautomata.states, currstate := anode(245, 51, [], [], []))
+
+   put(myautomata.states, currstate := anode(246, 51, [], [], []))
+
+   put(myautomata.states, currstate := anode(247, 51, [], [], []))
+
+   put(myautomata.states, currstate := anode(248, 51, [], [], []))
+
+   put(myautomata.states, currstate := anode(249, 51, [], [], []))
+   put(myautomata.accepting, currstate)
+
+   put(myautomata.states, currstate := anode(250, 51, [], [], []))
+
+   put(myautomata.states, currstate := anode(251, 51, [], [], []))
+
+   put(myautomata.states, currstate := anode(252, 51, [], [], []))
+
+   put(myautomata.states, currstate := anode(253, 51, [], [], []))
+
+   put(myautomata.states, currstate := anode(254, 51, [], [], []))
+   put(myautomata.accepting, currstate)
+
+   put(myautomata.states, currstate := anode(255, 52, [], [], []))
+
+   put(myautomata.states, currstate := anode(256, 52, [], [], []))
+
+   put(myautomata.states, currstate := anode(257, 52, [], [], []))
+
+   put(myautomata.states, currstate := anode(258, 52, [], [], []))
+
+   put(myautomata.states, currstate := anode(259, 52, [], [], []))
+
+   put(myautomata.states, currstate := anode(260, 52, [], [], []))
+
+   put(myautomata.states, currstate := anode(261, 52, [], [], []))
+
+   put(myautomata.states, currstate := anode(262, 52, [], [], []))
+   put(myautomata.accepting, currstate)
+
+   put(myautomata.states, currstate := anode(263, 53, [], [], []))
+
+   put(myautomata.states, currstate := anode(264, 53, [], [], []))
+
+   put(myautomata.states, currstate := anode(265, 53, [], [], []))
+
+   put(myautomata.states, currstate := anode(266, 53, [], [], []))
+
+   put(myautomata.states, currstate := anode(267, 53, [], [], []))
+
+   put(myautomata.states, currstate := anode(268, 53, [], [], []))
+
+   put(myautomata.states, currstate := anode(269, 53, [], [], []))
+
+   put(myautomata.states, currstate := anode(270, 53, [], [], []))
+
+   put(myautomata.states, currstate := anode(271, 53, [], [], []))
+
+   put(myautomata.states, currstate := anode(272, 53, [], [], []))
+
+   put(myautomata.states, currstate := anode(273, 53, [], [], []))
+   put(myautomata.accepting, currstate)
+
+   put(myautomata.states, currstate := anode(274, 54, [], [], []))
+
+   put(myautomata.states, currstate := anode(275, 54, [], [], []))
+   put(myautomata.accepting, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 0 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 1 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 274 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 1 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 2 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 263 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 2 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 3 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 255 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 3 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 4 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 243 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 4 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 5 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 241 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 5 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 6 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 237 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 6 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 7 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 235 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 7 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 8 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 233 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 8 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 9 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 230 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 9 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 10 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 227 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 10 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 11 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 225 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 11 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 12 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 222 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 12 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 13 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 219 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 13 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 14 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 216 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 14 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 15 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 213 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 15 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 16 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 210 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 16 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 17 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 208 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 17 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 18 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 205 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 18 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 19 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 203 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 19 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 20 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 201 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 20 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 21 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 199 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 21 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 22 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 197 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 22 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 23 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 195 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 23 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 24 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 193 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 24 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 25 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 191 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 25 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 26 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 189 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 26 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 27 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 187 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 27 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 28 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 185 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 28 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 29 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 183 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 29 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 30 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 181 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 30 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 31 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 179 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 31 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 32 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 177 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 32 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 33 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 175 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 33 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 34 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 169 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 34 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 35 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 163 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 35 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 36 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 158 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 36 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 37 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 153 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 37 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 38 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 148 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 38 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 39 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 141 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 39 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 40 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 134 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 40 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 41 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 127 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 41 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 42 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 120 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 42 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 43 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 115 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 43 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 44 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 111 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 44 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 45 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 108 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 45 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 46 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 104 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 46 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 47 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 98 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 47 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 48 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 93 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 48 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 49 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 86 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 49 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 50 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 80 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 50 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 51 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 78 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 51 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 52 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 76 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 52 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 53 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 67 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 53 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "/"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 54 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 54 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "*"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 55 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 55 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 56 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 56 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 57 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 59 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 63 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 57 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := csetfromrecset("[^*]")
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 58 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 58 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 56 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 63 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 59 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "*"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 60 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 60 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 59 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 61 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 61 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := csetfromrecset("[^/*]")
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 62 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 62 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 56 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 63 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 63 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "*"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 64 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 64 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 63 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 65 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 65 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "/"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 66 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 66 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 67 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "/"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 68 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 68 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "/"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 69 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 69 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 70 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 70 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 72 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 71 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.dot, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 71 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 70 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 72 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 72 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 74 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   tempedge := edge()
+   tempedge.symbol := "r"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 73 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 73 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 74 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 74 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "\n"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 75 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 75 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 76 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := csetfromrecset("[ \t\r\f]")
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 77 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 77 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 76 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 78 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "\n"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 79 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 79 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 80 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "b"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 81 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 81 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "r"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 82 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 82 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "e"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 83 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 83 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "a"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 84 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 84 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "k"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 85 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 85 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 86 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "d"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 87 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 87 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "o"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 88 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 88 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "u"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 89 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 89 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "b"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 90 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 90 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "l"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 91 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 91 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "e"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 92 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 92 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 93 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "e"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 94 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 94 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "l"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 95 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 95 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "s"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 96 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 96 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "e"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 97 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 97 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 98 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "f"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 99 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 99 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "a"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 100 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 100 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "l"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 101 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 101 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "s"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 102 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 102 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "e"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 103 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 103 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 104 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "f"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 105 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 105 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "o"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 106 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 106 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "r"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 107 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 107 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 108 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "i"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 109 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 109 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "f"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 110 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 110 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 111 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "i"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 112 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 112 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "n"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 113 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 113 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "t"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 114 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 114 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 115 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "n"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 116 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 116 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "u"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 117 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 117 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "l"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 118 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 118 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "l"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 119 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 119 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 120 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "p"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 121 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 121 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "u"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 122 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 122 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "b"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 123 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 123 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "l"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 124 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 124 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "i"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 125 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 125 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "c"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 126 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 126 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 127 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "r"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 128 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 128 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "e"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 129 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 129 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "t"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 130 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 130 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "u"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 131 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 131 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "r"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 132 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 132 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "n"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 133 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 133 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 134 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "s"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 135 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 135 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "t"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 136 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 136 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "a"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 137 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 137 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "t"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 138 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 138 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "i"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 139 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 139 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "c"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 140 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 140 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 141 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "s"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 142 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 142 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "t"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 143 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 143 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "r"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 144 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 144 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "i"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 145 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 145 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "n"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 146 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 146 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "g"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 147 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 147 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 148 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "t"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 149 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 149 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "r"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 150 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 150 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "u"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 151 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 151 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "e"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 152 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 152 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 153 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "b"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 154 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 154 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "o"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 155 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 155 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "o"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 156 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 156 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "l"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 157 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 157 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 158 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "v"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 159 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 159 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "o"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 160 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 160 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "i"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 161 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 161 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "d"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 162 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 162 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 163 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "w"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 164 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 164 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "h"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 165 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 165 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "i"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 166 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 166 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "l"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 167 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 167 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "e"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 168 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 168 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 169 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "c"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 170 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 170 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "l"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 171 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 171 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "a"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 172 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 172 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "s"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 173 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 173 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "s"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 174 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 174 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 175 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "("
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 176 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 176 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 177 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := ")"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 178 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 178 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 179 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "["
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 180 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 180 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 181 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "]"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 182 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 182 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 183 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "{"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 184 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 184 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 185 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "}"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 186 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 186 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 187 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := ";"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 188 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 188 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 189 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := ":"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 190 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 190 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 191 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "!"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 192 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 192 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 193 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "*"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 194 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 194 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 195 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "/"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 196 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 196 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 197 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "%"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 198 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 198 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 199 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "+"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 200 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 200 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 201 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "-"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 202 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 202 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 203 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "<"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 204 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 204 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 205 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "<"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 206 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 206 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "="
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 207 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 207 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 208 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := ">"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 209 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 209 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 210 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := ">"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 211 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 211 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "="
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 212 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 212 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 213 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "="
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 214 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 214 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "="
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 215 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 215 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 216 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "!"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 217 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 217 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "="
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 218 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 218 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 219 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "&"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 220 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 220 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "&"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 221 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 221 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 222 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "|"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 223 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 223 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "|"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 224 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 224 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 225 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "="
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 226 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 226 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 227 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "+"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 228 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 228 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "="
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 229 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 229 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 230 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "-"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 231 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 231 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "="
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 232 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 232 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 233 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := ","
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 234 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 234 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 235 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "."
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 236 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 236 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 237 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := csetfromrecset("[a-zA-Z_]")
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 238 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 238 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 239 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 239 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := csetfromrecset("[a-zA-Z0-9_]")
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 240 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 240 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 239 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 241 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := csetfromrecset("[0-9]")
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 242 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 242 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 241 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 243 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 245 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   tempedge := edge()
+   tempedge.symbol := csetfromrecset("[0-9]")
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 244 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 244 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 243 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 245 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 245 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "."
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 246 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 246 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 247 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 247 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 249 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   tempedge := edge()
+   tempedge.symbol := csetfromrecset("[0-9]")
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 248 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 248 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 247 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 249 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 249 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := csetfromrecset("[eE]")
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 250 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 250 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 251 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 251 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 253 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   tempedge := edge()
+   tempedge.symbol := csetfromrecset("[+-]")
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 252 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 252 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 253 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 253 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := csetfromrecset("[0-9]")
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 254 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 254 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 253 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 255 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := csetfromrecset("[0-9]")
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 256 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 256 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 255 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 257 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 257 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := csetfromrecset("[eE]")
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 258 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 258 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 259 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 259 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 261 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   tempedge := edge()
+   tempedge.symbol := csetfromrecset("[+-]")
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 260 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 260 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 261 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 261 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := csetfromrecset("[0-9]")
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 262 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 262 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 261 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 263 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "\""
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 264 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 264 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 265 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 265 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 266 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 268 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 272 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 266 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := csetfromrecset("[^\"]")
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 267 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 267 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 265 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 272 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 268 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "\\"
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 269 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 269 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 270 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 270 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 271 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.dot, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 271 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 265 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 272 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.epsilon, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 272 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   tempedge := edge()
+   tempedge.symbol := "\""
+   tempedge.destinations := []
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 273 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(tempedge.destinations, currstate)
+
+   put(state2.edges, tempedge)
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 273 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 274 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 275 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   put(state2.dot, currstate)
+
+   currstate := pop(myautomata.states)
+   put(myautomata.states, currstate)
+
+   while currstate.label ~= 275 do {
+      currstate := pop(myautomata.states)
+      put(myautomata.states, currstate)
+   }
+   state2 := currstate
+
+   init_semantic_actions()
+
+   return yyulex(myautomata)
+
+end
+
+procedure init_semantic_actions()
+
+   semantic_action := table()
+   semantic_action[1] := semantic_action_1
+   semantic_action[2] := semantic_action_2
+   semantic_action[3] := semantic_action_3
+   semantic_action[4] := semantic_action_4
+   semantic_action[5] := semantic_action_5
+   semantic_action[6] := semantic_action_6
+   semantic_action[7] := semantic_action_7
+   semantic_action[8] := semantic_action_8
+   semantic_action[9] := semantic_action_9
+   semantic_action[10] := semantic_action_10
+   semantic_action[11] := semantic_action_11
+   semantic_action[12] := semantic_action_12
+   semantic_action[13] := semantic_action_13
+   semantic_action[14] := semantic_action_14
+   semantic_action[15] := semantic_action_15
+   semantic_action[16] := semantic_action_16
+   semantic_action[17] := semantic_action_17
+   semantic_action[18] := semantic_action_18
+   semantic_action[19] := semantic_action_19
+   semantic_action[20] := semantic_action_20
+   semantic_action[21] := semantic_action_21
+   semantic_action[22] := semantic_action_22
+   semantic_action[23] := semantic_action_23
+   semantic_action[24] := semantic_action_24
+   semantic_action[25] := semantic_action_25
+   semantic_action[26] := semantic_action_26
+   semantic_action[27] := semantic_action_27
+   semantic_action[28] := semantic_action_28
+   semantic_action[29] := semantic_action_29
+   semantic_action[30] := semantic_action_30
+   semantic_action[31] := semantic_action_31
+   semantic_action[32] := semantic_action_32
+   semantic_action[33] := semantic_action_33
+   semantic_action[34] := semantic_action_34
+   semantic_action[35] := semantic_action_35
+   semantic_action[36] := semantic_action_36
+   semantic_action[37] := semantic_action_37
+   semantic_action[38] := semantic_action_38
+   semantic_action[39] := semantic_action_39
+   semantic_action[40] := semantic_action_40
+   semantic_action[41] := semantic_action_41
+   semantic_action[42] := semantic_action_42
+   semantic_action[43] := semantic_action_43
+   semantic_action[44] := semantic_action_44
+   semantic_action[45] := semantic_action_45
+   semantic_action[46] := semantic_action_46
+   semantic_action[47] := semantic_action_47
+   semantic_action[48] := semantic_action_48
+   semantic_action[49] := semantic_action_49
+   semantic_action[50] := semantic_action_50
+   semantic_action[51] := semantic_action_51
+   semantic_action[52] := semantic_action_52
+   semantic_action[53] := semantic_action_53
+   semantic_action[54] := semantic_action_54
+
+end
+
+procedure semantic_action_1()
+   { j0.comment(); }
+end
+
+procedure semantic_action_2()
+   { j0.comment(); }
+end
+
+procedure semantic_action_3()
+   { j0.whitespace(); }
+end
+
+procedure semantic_action_4()
+   { j0.newline(); }
+end
+
+procedure semantic_action_5()
+   { return j0.scan(parser.BREAK); }
+end
+
+procedure semantic_action_6()
+   { return j0.scan(parser.DOUBLE); }
+end
+
+procedure semantic_action_7()
+   { return j0.scan(parser.ELSE); }
+end
+
+procedure semantic_action_8()
+   { return j0.scan(parser.BOOLLIT); }
+end
+
+procedure semantic_action_9()
+   { return j0.scan(parser.FOR); }
+end
+
+procedure semantic_action_10()
+   { return j0.scan(parser.IF); }
+end
+
+procedure semantic_action_11()
+   { return j0.scan(parser.INT); }
+end
+
+procedure semantic_action_12()
+   { return j0.scan(parser.NULLVAL); }
+end
+
+procedure semantic_action_13()
+   { return j0.scan(parser.PUBLIC); }
+end
+
+procedure semantic_action_14()
+   { return j0.scan(parser.RETURN); }
+end
+
+procedure semantic_action_15()
+   { return j0.scan(parser.STATIC); }
+end
+
+procedure semantic_action_16()
+   { return j0.scan(parser.STRING); }
+end
+
+procedure semantic_action_17()
+   { return j0.scan(parser.BOOLLIT); }
+end
+
+procedure semantic_action_18()
+   { return j0.scan(parser.BOOL); }
+end
+
+procedure semantic_action_19()
+   { return j0.scan(parser.VOID); }
+end
+
+procedure semantic_action_20()
+   { return j0.scan(parser.WHILE); }
+end
+
+procedure semantic_action_21()
+   { return j0.scan(parser.CLASS); }
+end
+
+procedure semantic_action_22()
+   { return j0.scan(j0.ord("("));}
+end
+
+procedure semantic_action_23()
+   { return j0.scan(j0.ord(")"));}
+end
+
+procedure semantic_action_24()
+   { return j0.scan(j0.ord("["));}
+end
+
+procedure semantic_action_25()
+   { return j0.scan(j0.ord("]"));}
+end
+
+procedure semantic_action_26()
+   { return j0.scan(j0.ord("{"));}
+end
+
+procedure semantic_action_27()
+   { return j0.scan(j0.ord("}"));}
+end
+
+procedure semantic_action_28()
+   { return j0.scan(j0.ord(";"));}
+end
+
+procedure semantic_action_29()
+   { return j0.scan(j0.ord(":"));}
+end
+
+procedure semantic_action_30()
+   { return j0.scan(j0.ord("!"));}
+end
+
+procedure semantic_action_31()
+   { return j0.scan(j0.ord("*"));}
+end
+
+procedure semantic_action_32()
+   { return j0.scan(j0.ord("/"));}
+end
+
+procedure semantic_action_33()
+   { return j0.scan(j0.ord("%"));}
+end
+
+procedure semantic_action_34()
+   { return j0.scan(j0.ord("+"));}
+end
+
+procedure semantic_action_35()
+   { return j0.scan(j0.ord("-"));}
+end
+
+procedure semantic_action_36()
+   { return j0.scan(j0.ord("<"));}
+end
+
+procedure semantic_action_37()
+   { return j0.scan(parser.LESSTHANOREQUAL);}
+end
+
+procedure semantic_action_38()
+   { return j0.scan(j0.ord(">"));}
+end
+
+procedure semantic_action_39()
+   { return j0.scan(parser.GREATERTHANOREQUAL);}
+end
+
+procedure semantic_action_40()
+   { return j0.scan(parser.ISEQUALTO);}
+end
+
+procedure semantic_action_41()
+   { return j0.scan(parser.NOTEQUALTO);}
+end
+
+procedure semantic_action_42()
+   { return j0.scan(parser.LOGICALAND);}
+end
+
+procedure semantic_action_43()
+   { return j0.scan(parser.LOGICALOR);}
+end
+
+procedure semantic_action_44()
+   { return j0.scan(j0.ord("=")); }
+end
+
+procedure semantic_action_45()
+   { return j0.scan(parser.INCREMENT); }
+end
+
+procedure semantic_action_46()
+   { return j0.scan(parser.DECREMENT); }
+end
+
+procedure semantic_action_47()
+   { return j0.scan(j0.ord(",")); }
+end
+
+procedure semantic_action_48()
+   { return j0.scan(j0.ord(".")); }
+end
+
+procedure semantic_action_49()
+   { return j0.scan(parser.IDENTIFIER); }
+end
+
+procedure semantic_action_50()
+   { return j0.scan(parser.INTLIT); }
+end
+
+procedure semantic_action_51()
+   { return j0.scan(parser.DOUBLELIT); }
+end
+
+procedure semantic_action_52()
+   { return j0.scan(parser.DOUBLELIT); }
+end
+
+procedure semantic_action_53()
+   { return j0.scan(parser.STRINGLIT); }
+end
+
+procedure semantic_action_54()
+   { j0.lexErr("unrecognized character"); }
+end
+
