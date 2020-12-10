@@ -17,7 +17,6 @@ public class j0 {
     //   public static parserVal yylval;
    public static void init(String s) throws Exception {
       yyfilename = s;
-      System.out.println("yyfilename "+yyfilename);
       yylexer = new Yylex(new FileReader(s));
    }
    public static int YYEOF() { return Yylex.YYEOF; }

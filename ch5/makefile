@@ -13,12 +13,13 @@ j0gram.icn j0gram_tab.icn: j0gram.y
 	iyacc -dd j0gram.y
 
 
-
+# A typical run might use
+# set CLASSPATH=".;c:\users\username\byopl"
+# in order to run from c:\users\username\byopl\ch5
 BYSRC=parser.java parserVal.java
 JSRC=j0.java Yylex.java token.java yyerror.java tree.java serial.java $(BYSRC)
 BYJOPTS= -Jclass=parser -Jpackage=ch5
-IMP=importstatic
-BYJIMPS= -J$(IMP)=ch5.j0.yylex -J$(IMP)=ch5.yyerror.yyerror
+BYJIMPS= -Jyylex=ch5.j0.yylex -Jyyerror=ch5.yyerror.yyerror
 java: j0.class
 
 j: java
