@@ -1,0 +1,141 @@
+class tree (id,sym,rule,nkids,tok,kids,isConst,stab)
+  method print(level:0)
+    writes(repl(" ",level))
+    if \tok then {
+      write(id, "  ", tok.text, " (",tok.cat, "): ",tok.lineno)
+      }
+    else {
+       write(id, "   ", sym, " (", rule, "): ", nkids)
+       every (!kids).print(level+1)
+       }
+  end
+  method print_graph(fw)
+    if type(filename) == "string" then {
+      fw := open(filename,  "w") |
+        stop("can't open ", image(filename), " for writing")
+      write(fw, "digraph {")
+      print_graph(fw)
+      write(fw, "}")
+      close(fw)
+    }
+    else if \tok then print_leaf(fw)
+    else { 
+      print_branch(fw)
+      every i := 1 to nkids do
+        if \kids[i] then {
+          write(fw, "N",id," -> N",kids[i].id,";")
+          kids[i].print_graph(fw)
+        } else {
+          write(fw, "N",id," -> N",id,"_",j,";")
+          write(fw, "N", id, "_", j,
+                    " [label=\"Empty rule\"];")
+          j +:= 1
+        }
+    }
+  end
+  method print_leaf(pw)
+    local s := parser.yyname[tok.cat]
+    print_branch(pw)
+    write(pw,"N",id,
+          " [shape=box style=dotted label=\" ",s," \\n ")
+    write(pw,"text = ",escape(tok.text)," \\l lineno = ",
+             tok.lineno," \\l\"];\n")
+  end
+  method print_branch(pw)
+    write(pw, "N",id," [shape=box label=\"",
+          pretty_print_name(),"\"];\n");
+  end
+  method escape(s)
+    if s[1] == "\"" then
+      return "\\" || s[1:-1] || "\\\""
+    else return s
+  end
+  method pretty_print_name()
+    if /tok then return sym || "#" || (rule%10)
+    else return escape(tok.text) || ":" || tok.cat
+  end
+  method mkSymTables(curr)
+    stab := curr
+    case sym of {
+      "ClassDecl": { curr := symtab("class",curr) }
+      "MethodDecl": { curr := symtab("method",curr) }
+    }
+    every (!\kids).mkSymTables(curr)
+  end
+  method populateSymTables()
+  case sym of {
+    "ClassDecl": {
+       stab.insert(kids[1].tok.text, , kids[1].stab)
+       }
+    "FieldDecl" | "LocalVarDecl" : {
+       k := kids[2]
+       while \k & k.label=="VarDecls" do {
+         insert_vardeclarator(k.kids[2])
+         k := k.kids[1]
+         }
+       insert_vardeclarator(k); return
+       }
+    "MethodDecl": {
+      stab.insert(kids[1].kids[2].kids[1].tok.text, ,kids[1].stab)
+      }
+    "FormalParm": { insert_vardeclarator(kids[2]); return }
+    }
+    every (!\kids).populateSymTables()
+  end
+  method insert_vardeclarator(vd)
+   if \vd.tok then stab.insert(vd.tok.text)
+   else insert_vardeclarator(vd.kids[1])
+  end
+  method calc_isConst()
+   case sym of {
+      "INTLIT" | "DOUBLELIT" | "STRINGLIT" |
+      "BOOLFALSE" | "BOOLTRUE": isConst := "true"
+      "UnaryExpr": isConst := \kid[2].isConst
+      "RelExpr": isConst := \kid[1].isConst & \kid[3].isConst
+      "CondOrExpr" | "CondAndExpr" | "EqExpr" |
+      "MULEXPR"|
+      "ADDEXPR": isConst := \kid[1].isConst & \kid[2].isConst
+      default: isConst := &null
+   }
+   every (!\kids).calc_isConst()
+  end
+  method checkSymTables()
+    check_codeblocks()
+    
+  end
+  method check_codeblocks()
+   if sym == "MethodDecl" then { kids[2].check_block() }
+   else every k := !kids do
+         if k.nkids>0 then k.check_codeblocks()
+  end
+  method check_block()
+   case sym of {
+   "IDENTIFIER": {
+     if not (stab.lookup(tok.text)) then
+        j0.semerror("undeclared variable "||tok.text)
+     }
+   "FieldAccess" | "QualifiedName": kids[1].check_block()
+   "MethodCall": {
+      kids[1].check_block()
+      if rule = 1290 then
+         kids[2].check_block()
+      else kids[3].check_block()
+     }
+   "LocalVarDecl": { } # skip
+   default:  {
+      every k := !\kids do {
+            k.check_block()
+         }
+      }
+   }
+  end
+
+initially (s,r,x[])
+   id := serial.getid(); sym := s; rule := r
+   if type(x[1]) == "token__state" then {
+      nkids := 0; tok := x[1]
+   } else {
+      nkids := *x;
+      kids := x
+   }
+end
