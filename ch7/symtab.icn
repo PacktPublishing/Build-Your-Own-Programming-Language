@@ -1,0 +1,22 @@
+class symtab(scope, parent, t)
+  method lookup(s)
+    return if rv := \ (t[s]) then {
+              rv }
+           else {
+             (\parent).lookup(s)
+             }
+  end
+  method insert(s, isConst, sub, typ)
+      if \ (t[s]) then j0.semerror("redeclaration of " || s)
+      else { (\sub).parent := self
+             t[s] := symtab_entry(s, self, sub, isConst, typ) }
+  end
+  method print(level:0)
+    writes(repl(" ",level))
+    write(scope, " - ", *t, " symbols")
+    every (!t).print(level+1);
+  end
+
+initially
+  t := table()
+end

@@ -1,0 +1,22 @@
+class typeinfo(basetype)
+   method str()
+      return string(basetype)|"unknown"
+   end
+end
+class arraytype : typeinfo(element_type)
+initially
+   basetype := "array"
+end
+class methodtype : typeinfo(parameters,return_type)
+initially
+   basetype := "method"
+end
+class classtype : typeinfo(name, st, fields, methods, constrs)
+   method str()
+      return name
+   end
+initially
+   basetype := "class"
+end
+class parameter(name, element_type)
+end

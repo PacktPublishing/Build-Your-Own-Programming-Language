@@ -1,0 +1,63 @@
+global yylineno, yycolno, yylval, parser, global_st
+procedure main(argv)
+   j0 := j0()
+   serial := serial()
+   parser := Parser()
+   yyin := open(argv[1]) | stop("usage: j0 filename")
+   yylineno := yycolno := 1
+   if yyparse() = 0 then
+      write("no errors")
+end
+class j0()
+   method lexErr(s)
+      stop(s, ": ", yytext) 
+   end
+   method scan(cat)
+      yylval := tree("token", cat, token(cat, yytext, yylineno, yycolno))
+      yycolno +:= *yytext
+      return cat
+   end
+   method whitespace()
+      yycolno +:= *yytext
+   end
+   method newline()
+      yylineno +:= 1; yycolno := 1
+   end
+   method comment()
+      yytext ? {
+         while tab(find("\n")+1) do newline()
+         yycolno +:= *tab(0)
+      }
+   end
+   method ord(s)
+      return proc("ord",0)(s[1])
+   end
+   method print(root)
+      root.print()
+   end
+   method node(s,r,p[])
+      rv := tree ! ([s,r] ||| p)
+      return rv
+   end
+   method semantic(root)
+   local out_st, System_st
+     global_st := symtab("global")
+     System_st := symtab("class")
+     out_st := symtab("class")
+     out_st.insert("println", false, , methodtype())
+     System_st.insert("out", false, out_st, classtype("PrintStream",out_st))
+     global_st.insert("System", false, System_st, classtype("System",System_st))
+     root.mkSymTables(global_st)
+     root.populateSymTables()
+     root.checkSymTables()
+#     global_st.print()
+     root.checktype()
+   end
+   method semerror(s)
+     stop("semantic error: ", s)
+   end
+   method calctype(t)
+     t.kids[1].calctype()
+     t.kids[2].assigntype(t.kids[1].typ)
+   end
+end
