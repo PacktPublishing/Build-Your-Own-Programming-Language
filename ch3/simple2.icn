@@ -3,13 +3,12 @@ procedure main(argv)
    simple2 := simple2()
    yyin := open(argv[1]) | stop("usage: simple2 filename")
    yylineno := 1
-   while i := yylex() do {
+   while i := yylex() do
       write("token ", i, " (line ", yylval.lineno, "): ", yytext)
-      }
 end
 class simple2()
    method lexErr(s)
-      stop(s, ": ", yytext) 
+      stop(s, ": line ", yylineno, ": ", yytext) 
    end
    method scan(cat)
       yylval := token(cat, yytext, yylineno)
