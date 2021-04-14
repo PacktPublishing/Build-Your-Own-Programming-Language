@@ -8,7 +8,8 @@ public class simple2 {
       yylineno = 1;
       int i;
       while ((i=lex.yylex()) != Yylex.YYEOF) {
-         System.out.println("token " + i + ": " + yytext());
+	  System.out.println("token " + i +
+                   " (line " + yylval.lineno + "): " + yytext());
       }
    }
    public static String yytext() {
@@ -19,7 +20,7 @@ public class simple2 {
                              ": " + yytext());
       System.exit(1);
    }
-   public static int tokenize(int cat) {
+   public static int scan(int cat) {
       yylval = new token(cat, yytext(), yylineno);
       return cat;
    }
