@@ -1,0 +1,39 @@
+class token(cat, text, lineno, colno, ival, dval, sval, typ, isPublic, isStatic)
+   method deEscape(sin)
+      local sout := ""
+      sin := sin[2:-1]
+      sin ? {
+         while c := move(1) do {
+            if c == "\\" then {
+               if not (c := move(1)) then
+                  j0.lexErr("malformed string literal")
+               else case c of {
+                  "t":{ sout ||:= "\t" }
+                  "n":{ sout ||:= "\n" }
+                  }
+            }
+            else sout ||:= c
+         }
+      }
+      return sout
+   end
+method type(stab)
+  if \typ then return typ
+  if cat === parser.IDENTIFIER then
+    if rv := stab.lookup(text) then return typ := rv.typ
+  stop("line ", lineno ,": cannot check type of undeclared ", image(text))
+end
+initially
+   case cat of {
+     parser.INT:     typ := typeinfo("int")
+     parser.DOUBLE:  typ := typeinfo("double")
+     parser.BOOLEAN: typ := typeinfo("boolean")
+     parser.VOID:    typ := typeinfo("void")
+     parser.INTLIT: { ival := integer(text); typ:=typeinfo("int") }
+     parser.DOUBLELIT: { dval := real(text); typ:=typeinfo("double") }
+     parser.STRINGLIT: { sval := deEscape(text); typ:=classtype("String") }
+     parser.BOOLLIT: { typ := typeinfo("boolean") }
+     parser.NULLVAL: { typ := typeinfo("null") }
+     ord("="|"+"|"-"): { typ := typeinfo("n/a") }
+   }
+end
