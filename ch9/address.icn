@@ -1,0 +1,16 @@
+class address(region, offset)
+method regaddr()
+  return if region == "method" then "loc" else region
+end
+method str()
+  case region of {
+  "lab": return "L"||offset
+  "loc"|"imm"|"method"|"global"|"class"|"strings":
+    return regaddr() || ":" || offset
+  }
+  return region
+end
+method print()
+  writes(str())
+end
+end

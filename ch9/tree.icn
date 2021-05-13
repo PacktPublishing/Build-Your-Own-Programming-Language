@@ -1,0 +1,636 @@
+class tree (id,sym,rule,nkids,tok,kids,isConst,stab,
+	    typ,icode,addr,first,follow,onTrue,onFalse)
+  method print(level:0)
+    writes(repl(" ",level))
+    if \tok then {
+      write(id, "  ", tok.text, " (",tok.cat, "): ",tok.lineno)
+      }
+    else {
+       write(id, "   ", sym, " (", rule, "): ", nkids)
+       every (!kids).print(level+1)
+       }
+  end
+  method print_graph(fw)
+    if type(filename) == "string" then {
+      fw := open(filename,  "w") |
+        stop("can't open ", image(filename), " for writing")
+      write(fw, "digraph {")
+      print_graph(fw)
+      write(fw, "}")
+      close(fw)
+    }
+    else if \tok then print_leaf(fw)
+    else { 
+      print_branch(fw)
+      every i := 1 to nkids do
+        if \kids[i] then {
+          write(fw, "N",id," -> N",kids[i].id,";")
+          kids[i].print_graph(fw)
+        } else {
+          write(fw, "N",id," -> N",id,"_",j,";")
+          write(fw, "N", id, "_", j,
+                    " [label=\"Empty rule\"];")
+          j +:= 1
+        }
+    }
+  end
+  method print_leaf(pw)
+    local s := parser.yyname[tok.cat]
+    print_branch(pw)
+    write(pw,"N",id,
+          " [shape=box style=dotted label=\" ",s," \\n ")
+    write(pw,"text = ",escape(tok.text)," \\l lineno = ",
+             tok.lineno," \\l\"];\n")
+  end
+  method print_branch(pw)
+    write(pw, "N",id," [shape=box label=\"",
+          pretty_print_name(),"\"];\n");
+  end
+  method escape(s)
+    if s[1] == "\"" then
+      return "\\" || s[1:-1] || "\\\""
+    else return s
+  end
+  method pretty_print_name()
+    if /tok then return sym || "#" || (rule%10)
+    else return escape(tok.text) || ":" || tok.cat
+  end
+  method mkSymTables(curr)
+    stab := curr
+    case sym of {
+      "ClassDecl": { curr := symtab("class",curr) }
+      "MethodDecl": { curr := symtab("method",curr) }
+    }
+    every (!\kids).mkSymTables(curr)
+  end
+  method populateSymTables()
+  case sym of {
+    "ClassDecl": {
+       stab.insert(kids[1].tok.text, , kids[1].stab) # new classtype() ?
+       }
+    "FieldDecl" | "LocalVarDecl" : {
+       k := kids[2]
+       while \k & k.sym=="VarDecls" do {
+         insert_vardeclarator(k.kids[2])
+         k := k.kids[1]
+         }
+       insert_vardeclarator(k); return
+       }
+    "MethodDecl": {
+      stab.insert(kids[1].kids[2].kids[1].tok.text, ,kids[1].stab,
+	          kids[1].kids[2].typ)
+      kids[1].stab.insert("return", , , kids[1].kids[1].typ)
+      }
+    "FormalParm": { insert_vardeclarator(kids[2]); return }
+    }
+    every (!\kids).populateSymTables()
+  end
+  method insert_vardeclarator(vd)
+    if \vd.tok then stab.insert(vd.tok.text,&null,&null,vd.typ)
+    else insert_vardeclarator(vd.kids[1])
+  end
+  method calc_isConst()
+   every (!\kids).calc_isConst()
+   case sym of {
+      "INTLIT" | "DOUBLELIT" | "STRINGLIT" |
+      "BOOLFALSE" | "BOOLTRUE": isConst := "true"
+      "UnaryExpr": isConst := \kid[2].isConst
+      "RelExpr": isConst := \kid[1].isConst & \kid[3].isConst
+      "CondOrExpr" | "CondAndExpr" | "EqExpr" |
+      "MULEXPR"|
+      "ADDEXPR": isConst := \kid[1].isConst & \kid[2].isConst
+      default: isConst := &null
+   }
+  end
+  # after symbol table population, we have enough information to fill in
+  # correct class type information.
+  method mkcls()
+    if sym == "ClassDecl" then {
+        rv := stab.lookup(kids[1].tok.text)
+        flds := []; methds := []; constrs := []
+        every k := key(rv.st.t) do
+           if match("method ", rv.st.t[k].typ.str()) then
+             put(methds, parameter(k, rv.st.t[k].typ))
+           else
+             put(flds, parameter(k, rv.st.t[k].typ))
+        (/(rv.typ) := classtype(kids[1].tok.text, rv.st, flds, methds, constrs))
+    }
+    else every k := !kids do
+      if k.nkids>0 then k.mkcls()
+  end
+  method checkSymTables()
+    check_codeblocks()
+  end
+  # this looks for undeclareds
+  method check_codeblocks()
+   if sym == "MethodDecl" then { kids[2].check_block() }
+   else every k := !kids do
+         if k.nkids>0 then k.check_codeblocks()
+  end
+  method check_block()
+   case sym of {
+   "IDENTIFIER": {
+     if not (stab.lookup(tok.text)) then
+        j0.semErr("undeclared variable "||tok.text)
+     }
+   "FieldAccess" | "QualifiedName": kids[1].check_block()
+   "MethodCall": {
+      kids[1].check_block()
+      if rule = 1290 then
+         kids[2].check_block()
+      else kids[3].check_block()
+     }
+   "LocalVarDecl": { } # skip
+   default:  {
+      every k := !\kids do {
+            k.check_block()
+         }
+      }
+   }
+  end
+  # calctype - synthesize the type of a variable declaration
+  method calctype()
+    every (!\kids).calctype()
+    case sym of {
+      "FieldDecl": typ := kids[1].typ
+      "token": {
+         if typ := \ (tok.typ) then return
+         case tok.cat of {
+         parser.IDENTIFIER:{
+           if \ (rv := (\stab).lookup(tok.text)) then {
+              if typ := \ (rv.typ) then
+                 return typ
+              }
+           return typ := classtype(tok.text)
+           }
+         default:
+           j0.semErr("can't grok the type of " || image(tok.text) ||
+		     " cat " || tok.cat)
+         }
+      }
+    default:
+       j0.semErr("don't know how to calctype " || image(sym))
+    }
+  end
+
+   # check a call against a signature
+   method cksig(sig)
+   local i:=*sig.parameters, nactual := 1, t := kids[2]
+     if /t then {
+       if i ~= 0 then stop("0 parameters, expected ", i)
+       }
+     else {
+       while t.sym == "ArgList" do { nactual +:= 1; t:=t.kids[1] }
+       if nactual ~= i then
+         stop(nactual, " parameters, expected ", i)
+       t := kids[2]
+       while t.sym == "ArgList" do {
+         check_types(t.kids[-1].typ, sig.parameters[i])
+         t := t.kids[1]; i-:=1
+         }
+       check_types(t.typ, sig.parameters[1])
+     }
+     typ := sig.return_type
+   end
+
+  # return a list of types corresponding to a syntax subtree parameter list
+  method mksig()
+     case sym of {
+        "FormalParm": return [kids[1].typ]
+        "FormalParmList": return kids[1].mksig() ||| kids[2].mksig()
+        }
+  end
+
+  # assigntype - inherit a type, typically into a variable declaration list
+  method assigntype(t)
+  local parmList
+    typ := t
+    case sym of {
+    "VarDeclarator": { # we have an ARRAY of whatever type t was
+      kids[1].assigntype(arraytype(t))
+      return
+    }
+    "MethodDeclarator": { # pass a return type into a method
+       parmList := (\ (kids[2]).mksig()) | []
+       kids[1].typ := typ := methodtype(parmList , t)
+       return
+    }
+    "token": {
+      case tok.cat of {
+         parser.IDENTIFIER: return
+         default: stop("eh? ", image(tok.cat))
+      }
+    }
+    default:
+       stop("don't know how to assign the type of ", image(sym))
+    }
+    every (!\kids).assigntype(t)
+  end
+
+method checkkids(in_codeblock)
+    case sym of {
+       # turn on in executable StmtBlock
+       "MethodDecl": { kids[2].checktype(1); return }
+       # turn off in LocalVarDecl list...(back on in initializers, if any)
+       "LocalVarDecl": { kids[2].checktype(); return }
+       "FieldAccess": { kids[1].checktype(in_codeblock);
+          return }
+       "QualifiedName": { # has to be a type you can . on
+           kids[1].checktype(in_codeblock);
+       }
+       "RelExpr": {
+           kids[1].checktype(in_codeblock);
+           kids[3].checktype(in_codeblock);
+       }
+       default: { every (!\kids).checktype(in_codeblock) }
+       }
+end
+
+  # given a qualifiedname, return its type
+  method dequalify()
+  local rv, ste
+    if kids[1].sym == "QualifiedName" then
+      rv := kids[1].dequalify()
+    else if kids[1].sym=="token" &
+            kids[1].tok.cat=parser.IDENTIFIER then {
+      if not \ (rv := stab.lookup(kids[1].tok.text)) then
+         j0.semErr("unknown symbol " || kids[1].tok.text)
+      rv := rv.typ
+    }
+    else j0.semErr("can't dequalify " || sym)
+    if rv.basetype ~== "class" then
+      j0.semErr("can't dequalify " || rv.basetype)
+    if \ (ste := rv.st.lookup(kids[2].tok.text)) then
+      return ste.typ
+    else j0.semErr("couldn't lookup " || kids[2].tok.text ||
+		   " in " || rv.str())
+end
+
+  # checktype - check, and determine, the type of each expression
+  method checktype(in_codeblock)
+    if checkkids(in_codeblock) then return
+    if /in_codeblock then return
+    case sym of {
+    "Assignment": typ := check_types(kids[1].typ, kids[3].typ)
+    "AddExpr": typ := check_types(kids[1].typ, kids[2].typ)
+    "RelExpr": typ := check_types(kids[1].typ, kids[3].typ)
+    "ArgList"|"Block" | "BlockStmts": { typ := &null }
+    "MethodCall": {
+      if rule = 1290 then {
+        if kids[1].sym == "QualifiedName" then {
+          rv := kids[1].dequalify()
+          cksig(rv)
+          }
+        else {
+           if kids[1].sym ~== "token" then
+              stop("can't check type of Name ", kids[1].sym)
+           if (\ (kids[1].tok)).cat == parser.IDENTIFIER then {
+              write("checking the type of a call to ", kids[1].tok.text)
+              if ( \ (rv := stab.lookup(kids[1].tok.text))) then {
+                 rv := rv.typ
+#make sure it is actually a method
+                 if not match("method ", rv.str()) then
+                   stop("method expected, got ", rv.str())
+                 cksig(rv)
+		}
+              }
+           else stop("can't check the type of token ", kids[1].tok.cat)
+}
+           }
+        else stop("Jzero does not handle complex calls")
+    }
+    "QualifiedName": {
+       # get my type by look up kid #2 within kid #1
+       if type(kids[1].typ) == "classtype__state" then {
+         typ := (kids[1].typ.st.lookup(kids[2].tok.text)).typ
+       } else if type(kids[1].typ) == "arraytype__state" &
+                 kids[2].tok.text=="length" then {
+         typ := typeinfo("int")
+       } else stop("illegal . operator on ",kids[1].typ.str())
+      }
+    "InstanceCreation": {
+      if not (rv := stab.lookup(kids[1].tok.text)) then
+        stop("unknown type ",kids[1].tok.text)
+      if not (typ := \ (rv.typ)) then
+        stop(kids[1].tok.text, " has unknown type")
+    }
+    "ArrayCreation": typ := arraytype(kids[1].typ)
+    "ArrayAccess": {
+       if match("array ", kids[1].typ.str()) then {
+          if kids[2].typ.str()=="int" then
+             typ := kids[1].typ.element_type
+          else stop("subscripting array with ",kids[2].typ.str())
+          }
+       else stop("illegal subscript on type ", kids[1].typ.str())
+       }
+    "ReturnStmt": {
+      # check the return type against the current function
+      if not (rt := ( \ (stab.lookup("return")).typ)) then
+         stop("stab did not find a returntype")
+      if \ (kids[1].typ) then
+          typ := check_types(rt, kids[1].typ)
+       else { # return; check that return type is void
+          if rt.str() ~== "void" then
+             stop("void return from non-void method")
+          typ := rt
+       }
+    }
+    "token": typ := tok.type(stab)
+    "IfThenStmt"|"WhileStmt": { # no checks for j0 statements
+    }
+    default: { stop("cannot check the type of: ", image(sym)) }
+    }
+  end
+   method get_op()
+      return case sym of {
+          "ReturnStmt" : "return"
+          "MethodCall" : "param"
+          "Assignment" : "="
+          "AddExpr": if rule=1320 then "+" else "-"
+          "RelExpr": {
+            if kids[2].sym === "token" then return kids[2].tok.text
+            }
+          default: fail
+      }
+   end
+
+   method check_types(op1, op2)
+      operator := get_op()
+      tok := findatoken()
+      case operator of {
+         "param"|"return"|"="|"+"|"-" : {
+            if op1.str() === op2.str() ===
+                   ("int"|"double"|"String") then {
+               # write("typecheck ",operator," on a ", op1.str(),
+               #      " and a ", op2.str(), " -> OK")
+               return op1
+               }
+            else if (op1.basetype===op2.basetype==="array") & operator==="=" &
+                    check_types(op1.element_type,op2.element_type) then {
+               return op1
+               }
+            else if (op1.str() == op2.str()) & operator ==="=" then {
+               return op1
+               }
+            else {
+               writes(&errout, "line ", (\tok).tok.lineno, ": ")
+               j0.semErr("typecheck "||operator||" on a "||
+		      op1.str()|| " and a "|| op2.str()|| " -> FAIL")
+              }
+            }
+         "<"|">": {
+            if op1.str() === op2.str() === ("int"|"double") then {
+               # write("typecheck ",operator," on a ", op1.str(),
+               #      " and a ", op2.str(), " -> OK")
+               return typeinfo("bool")
+               }
+            }
+         default: {
+            writes(&errout, "line ", (\tok).tok.lineno, ": ")
+            j0.semErr("don't know how to check " || image(operator))
+            }
+        }
+   end
+  method findatoken()
+    if sym==="token" then return self
+    return (!kids).findatoken()
+  end
+method genlabel()
+   return address("lab", serial.getid())
+end
+method genlocal()
+   return stab.genlocal()
+end
+method genfirst()
+  every (!\kids).genfirst()
+  case sym of {
+  "UnaryExpr": first := \kids[2].first | genlabel()
+  "AddExpr"|"MulExpr"|"RelExpr": {
+     first := (\ (kids[1|2].first)) | genlabel()
+     }
+  "Block"|"WhileStmt": {
+    first := \ (kids[1].first) | genlabel()
+  }
+  "BlockStmts": {
+    / (kids[2].first) := genlabel()
+    first := \ (kids[1|2].first) | genlabel()
+  }
+  # ...
+  default: first := (!\kids).first
+  }
+end
+method genfollow()
+   case sym of {
+   "MethodDecl": {
+     kids[2].follow := follow := genlabel()
+     }
+   "BlockStmts": {
+      kids[1].follow := kids[2].first
+      kids[2].follow := follow
+      }
+   "Block": {
+      kids[1].follow := follow
+      }
+   # ...
+   }
+   every (!\kids).genfollow()
+end
+
+method gencode()
+  every (!\kids).gencode()
+  case sym of {
+    "ClassDecl": { genClassDecl() }
+    "AddExpr": { genAddExpr() }
+    "MulExpr": { genMulExpr() }
+    "RelExpr": { genRelExpr() }
+    "WhileStmt": { genWhileStmt() }
+    "IfThenStmt": { genIfThenStmt() }
+    "Assignment": { genAssignment() }
+    "MethodCall": { genMethodCall() }
+    "MethodDecl": { genMethodDecl() }
+    "QualifiedName": { genQualifiedName() }
+    # ...
+    "token":   { gentoken() }
+    default: {
+       icode := []
+       every icode |||:= (!\kids).icode
+       }
+   }
+end
+
+method genClassDecl()
+  icode := []
+  # emit string constants
+  if *(stringtab.t)>0 then {
+    icode |||:= gen(".string")
+    every k := key(stringtab.t) do {
+      x := stringtab.lookup(k)
+if / (x.addr) then stop("null label in stringtab")
+      icode |||:= gen("LAB", x.addr)
+      icode |||:= gen("string", address(k))
+      }
+    }
+
+    # emit the globals 
+    every k := key(global_st.t) do {
+      x := global_st.lookup(k)
+      # if type is not a proc...or class or something
+      if /first_global then { icode |||:= gen(".global"); first_global := 1 }
+      icode |||:= gen("global", x.addr, k)
+      }
+  icode |||:= gen(".code")
+  every icode |||:= (!kids).icode
+end
+
+method genAssignment()
+  addr := kids[1].addr
+  icode := [ ]
+  every icode |||:= kids[1|3].icode
+  icode |||:= gen("ASN", addr, kids[3].addr)
+end
+
+method genAddExpr()
+      addr := genlocal()
+      icode := kids[1].icode ||| kids[2].icode |||
+              gen(if rule=1320 then "ADD" else "SUB",
+                  addr, kids[1].addr, kids[2].addr)
+end
+
+method genMulExpr()
+  addr := genlocal()
+  icode := [ ]
+  every icode |||:= (!kids).icode
+  if rule=1310 then
+    icode |||:= gen("MUL", addr, kids[1].addr, kids[2].addr)
+  else if rule=1311 then
+    icode |||:= gen("DIV", addr, kids[1].addr, kids[2].addr)
+  else
+    icode |||:= gen("MOD", addr, kids[1].addr, kids[2].addr)
+end
+
+method genMethodDecl()
+   icode := [ ]
+
+   icode |||:= gen("proc", address(kids[1].kids[2].kids[1].tok.text, 0))
+   every icode |||:= (!kids).icode
+   icode |||:= gen("LAB", follow)
+   icode |||:= gen("RET")
+   icode |||:= gen("end")
+end
+
+method gentoken()
+  icode := []
+  case tok.cat of {
+    parser.IDENTIFIER: {
+       addr := stab.lookup(tok.text).addr }
+    parser.INTLIT: { addr := address("imm", tok.ival) }
+    parser.STRINGLIT: {
+      stringtab.insert(tok.text, 1, &null, typeinfo("string"))
+      addr := stringtab.lookup(tok.text).addr
+      }
+    # ...
+    }
+end
+
+method gentargets()
+   case sym of {
+   "IfThenStmt"|"WhileStmt": {
+      kids[1].onTrue := kids[2].first
+      kids[1].onFalse := follow
+      }
+   "CondAndExpr": {
+      kids[1].onTrue := kids[2].first
+      kids[1].onFalse := onFalse
+      kids[2].onTrue := onTrue
+      kids[2].onFalse := onFalse
+      }    
+   # ...
+   }
+   every (!\kids).gentargets()
+end
+
+method genRelExpr()
+  op :=  case kids[2].tok.cat of {
+    ord("<"): "BLT"; ord(">"): "BGT";
+    parser.LESSTHANOREQUAL: "BLE"
+    parser.GREATERTHANOREQUAL: "BGT" }
+  icode := kids[1].icode ||| kids[3].icode |||
+            gen(op, onTrue, kids[1].addr, kids[3].addr) |||
+            gen("GOTO", onFalse)
+end
+
+method genIfThenStmt()
+if / (kids[1].first) then stop("null first lab in ifthen")
+if / (kids[1].onTrue) then stop("null onTrue lab in ifthen")
+  icode := gen("LAB", kids[1].first) ||| kids[1].icode |||
+           gen("LAB", kids[1].onTrue) |||
+           kids[2].icode
+end
+
+method genWhileStmt()
+  icode := gen("LAB", kids[1].first) ||| kids[1].icode |||
+           gen("LAB", kids[1].onTrue) |||
+           kids[2].icode ||| gen("GOTO", kids[1].first)
+end
+
+#  class.member
+method genQualifiedName()
+   icode := [ ]
+   icode |||:= kids[1].icode
+   if match("method ",((\ typ).str())) then { # no icode, compile-time method resolution
+      addr := kids[1].typ.str() || "__" || kids[2].tok.text
+      }
+   else {
+      addr := genlocal()
+      if match("array ", (\ (kids[1].typ)).str()) then { # array.length
+         icode |||:= gen("ASIZE", addr, kids[1].addr)
+         }
+      else if \ (ste := (\ (kids[1].typ)).st.lookup(kids[2].tok.text)) then {
+         # lookup address within class
+         /(kids[2].addr) := ste.addr
+         icode |||:= gen("FIELD", addr, kids[1].addr, kids[2].addr)
+      }
+   }
+end
+
+method genMethodCall()
+  local nparms := 0
+  if k := \ kids[2] then {
+    icode := k.icode
+    while k.sym === "ArgList" do {
+       icode |||:= gen("PARM", k.kids[2].addr)
+       k := k.kids[1]; nparms +:= 1
+       }
+    icode |||:= gen("PARM", k.addr); nparms +:= 1
+    }
+  else icode := [ ]
+
+  # after all parameters, extra parameter for the object.
+
+  if kids[1].sym === "QualifiedName" then {
+    # icode for a qualifiedname will be non-empty
+    icode |||:= kids[1].icode
+    # addr for a qualified name will be new temp var
+    icode |||:= gen("PARM", kids[1].kids[1].addr)
+    }
+  else {
+    icode |||:= gen("PARM", "self")
+    }
+  icode |||:= gen("CALL", kids[1].addr, nparms)
+end
+
+
+method gen(o, o1, o2, o3)
+   return [ tac(o, o1, o2, o3) ]
+end
+
+initially (s,r,x[])
+   id := serial.getid(); sym := s; rule := r
+   if type(x[1]) == "token__state" then {
+      nkids := 0; tok := x[1]
+      typ := (\tok).typ
+   } else {
+      nkids := *x;
+      kids := x
+   }
+end

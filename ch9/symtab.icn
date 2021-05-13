@@ -1,0 +1,38 @@
+class symtab(scope, parent, t, count)
+  method lookup(s)
+    return if rv := \ (t[s]) then {
+              rv }
+           else {
+             (\parent).lookup(s)
+             }
+  end
+  method insert(s, isConst, sub, typ)
+    if \ (t[s]) then {
+      if scope == "strings" then {
+#         write("eureka, a duplicate string constant")
+         }
+      else
+         j0.semErr("redeclaration of " || s)
+      }
+    else {
+      (\sub).parent := self
+      t[s] := symtab_entry(s, self, sub, isConst, typ,
+                           address(scope,count))
+      count +:= 8
+      }
+  end
+  method genlocal()
+  local s := "__local$" || count
+    insert(s, false, , typeinfo("int"))
+    return t[s].addr
+  end
+  method print(level:0)
+    writes(repl(" ",level))
+    write(scope, " - ", *t, " symbols")
+    every (!t).print(level+1);
+  end
+
+initially
+  t := table()
+  count := 0
+end

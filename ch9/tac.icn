@@ -1,0 +1,27 @@
+class tac(op, op1, op2, op3)
+   method print()
+      case op of {
+      "proc": write(op || "\t" || op1.region || ",0,0")
+			     # || op2.str() || "," || op3.str());
+      "end"|".code"|".global"|".string": write(op)
+      "LAB": write("L",op1.offset,":")
+      default: {
+	  writes("\t" || op)
+	  if \op1 then {
+             writes("\t")
+             if string(op1) then {
+                if ste := stringtab.lookup(op1) then writes("str:", ste.addr.offset)
+                else writes(op1)
+                }
+             else
+	        writes(op1.str())
+	     if \op2 then
+	        writes("," || (string(op2)|op2.str()))
+	     if \op3 then
+	        writes("," || op3.str())
+	     }
+	  write()
+	  }
+      }
+   end
+end
