@@ -1,9 +1,10 @@
-global yylineno, yylval, parser
+global yylineno, yylval, parser, yyfilename
 procedure main(argv)
    j0 := j0()
    serial := serial()
    parser := Parser()
    yyin := open(argv[1]) | stop("usage: j0 filename")
+   yyfilename := argv[1]
    yylineno := 1
    if yyparse() = 0 then
       write("no errors")
@@ -31,6 +32,7 @@ class j0()
    end
    method print(root)
       root.print()
+      root.print_graph(yyfilename || ".dot")
    end
    method node(s,r,p[])
       return tree ! ([s,r] ||| p)

@@ -51,6 +51,7 @@ public class j0 {
    }
    public static short ord(String s) { return (short)(s.charAt(0)); }
    public static void print(parserVal root) {
+       ((tree)root.obj).print();
        ((tree)root.obj).print_graph(yyfilename + ".dot");
    }
   public static tree unwrap(Object obj) {

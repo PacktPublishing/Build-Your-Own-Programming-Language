@@ -10,9 +10,9 @@ class tree (id,sym,rule,nkids,tok,kids)
        }
   end
   method print_graph(fw)
-    if type(filename) == "string" then {
-      fw := open(filename,  "w") |
-        stop("can't open ", image(filename), " for writing")
+    if type(fw) == "string" then {
+      fw := open(fw,  "w") |
+        stop("can't open ", image(fw), " for writing")
       write(fw, "digraph {")
       print_graph(fw)
       write(fw, "}")
@@ -34,7 +34,7 @@ class tree (id,sym,rule,nkids,tok,kids)
     }
   end
   method print_leaf(pw)
-    local s := parser.yyname[tok.cat]
+    local s := yyname[tok.cat]
     print_branch(pw)
     write(pw,"N",id,
           " [shape=box style=dotted label=\" ",s," \\n ")
