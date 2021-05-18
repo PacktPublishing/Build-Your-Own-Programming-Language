@@ -267,7 +267,7 @@ void check_block() {
       typeinfo ta[] = new typeinfo[ta1.length + ta2.length];
       for(int i=0; i<ta1.length; i++) ta[i]=ta1[i];
       for(int j=0; j<ta2.length; j++)
-	ta[ta1.length+j]=ta1[j];
+	ta[ta1.length+j]=ta2[j];
       return ta;
       }
     return null;
@@ -337,7 +337,7 @@ void check_block() {
     switch (sym) {
     case "Assignment": typ = check_types(kids[0].typ, kids[2].typ); break;
     case "AddExpr": typ = check_types(kids[0].typ, kids[1].typ); break;
-    case "Block": case "BlockStmts": typ = null; break;
+    case "ArgList": case "Block": case "BlockStmts": typ = null; break;
     case "MethodCall":
       if (rule == 1290) {
         symtab_entry rve;
