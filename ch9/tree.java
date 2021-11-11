@@ -730,8 +730,10 @@ void genMethodCall() {
       k = k.kids[0]; nparms++; }
     icode.addAll(gen("PARM", k.addr)); nparms++;
     }
-  if (kids[0].sym.equals("QualifiedName"))
+  if (kids[0].sym.equals("QualifiedName")) {
+    icode.addAll(kids[0].icode);
     icode.addAll(gen("PARM", kids[0].kids[0].addr));
+  }
   else icode.addAll(gen("PARM", new address("self",0)));
   icode.addAll(gen("CALL", kids[0].addr, new address("imm",nparms)));
 }
