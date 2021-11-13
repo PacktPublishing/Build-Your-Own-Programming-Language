@@ -1,5 +1,5 @@
 link signed
-class j0machine(code, finstr, ip, stack, data, sp, bp, hp, op, opr, opnd)
+class j0machine(code, ip, stack, data, finstr, sp, bp, hp, op, opr, opnd)
   # loadbytecode at present returns everything after the first two-words of header
   method loadbytecode(filename)
     sz := stat(filename).size
@@ -20,10 +20,8 @@ class j0machine(code, finstr, ip, stack, data, sp, bp, hp, op, opr, opnd)
     Op()
     ip := 16
     ip := finstr := 8*getOpnd()
-    sdr := list(10,0)
-    stack := list(100000, 0)
-    # first 24 bytes of code are header and startword index
     data := Data(code[25:ip+1])
+    stack := list()
     bp := sp := 1
   end
   method fetch()
@@ -33,18 +31,7 @@ class j0machine(code, finstr, ip, stack, data, sp, bp, hp, op, opr, opnd)
     ip +:= 8
   end
   method getOpnd()
-    local i := 0, j
-    s := reverse(code[ip+3+:6])
-#    write("s ", image(s), " *s ", *s)
-    k := signed(s)
-    return k
-    every j := 8 to 3 by -1 do {
-      b := ord(code[ip+j])
-write("b: ", b)
-      i := ishift(i, 8) + ord(code[ip+j])
-      }
-write("getOpnd returns ", i)
-    return i
+    return signed(reverse(code[ip+3+:6]))
   end
   method word(s)
    local i := 0, j
@@ -114,12 +101,8 @@ write("getOpnd returns ", i)
   method deref(reg, od)
     case reg of {
       Op.R_ABS: {
-        if od < finstr then {
-           return data.word(od)
-           }
-        else {
-           return code[od]
-           }
+        if od < finstr then return data.word(od)
+        else return code[od]
         }
       Op.R_IMM: { return od }
       Op.R_STACK: { return stack[bp+od] }

@@ -10,7 +10,8 @@ public class j0x {
     try {
       j0machine.init(filename);
     } catch(Exception ex) {
-	System.err.println("goodbye"); System.exit(1);
+	System.err.println("Can't initialize. Exiting.");
+	System.exit(1);
     }
     j0machine.interp();
   }

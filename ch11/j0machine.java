@@ -24,7 +24,8 @@ public class j0machine {
   }
 
   public static int find(byte[]needle, byte[]haystack) {
-    for(int i = 0; i < haystack.length - needle.length+1; ++i) {
+    int i=0;
+    for( ; i < haystack.length - needle.length+1; ++i) {
         boolean found = true;
         for(int j = 0; j < needle.length; ++j) {
            if (haystack[i+j] != needle[j]) {
@@ -55,17 +56,10 @@ public class j0machine {
       ip += 8;
   }
   public static long getOpnd() {
-      byte b;
-      long i=0;
-      int j;
-      b = codebuf.get(ip+7);
-      if (b < 0) i = -1;
-      for(j=7;j>1;j--) {
-	  b = codebuf.get(ip+j);
-	  i = (i<<8) | b;
-      }
-      return i;
-      //      return (codebuf.getLong(ip) >> 16) & 0x00FFFFFFFFFFFFFFL;
+   long i=0;
+   if (codebuf.get(ip+7) < 0) i = -1;
+   for(int j=7;j>1;j--) i = (i<<8) | codebuf.get(ip+j);
+   return i;
   }
   public static void stop(String s) {
     System.err.println(s);
