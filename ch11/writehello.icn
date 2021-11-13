@@ -1,0 +1,15 @@
+procedure main()
+    f := open("hello.j0","w") | stop("can't open hello.j0")
+    writes(f, "Jzero!!\0")		# word 0, magic word
+    writes(f, "1.0\0\0\0\0\0")          # word 1, version #
+    writes(f, "\0\0\4\0\0\0\0\0")       # word 2, first instruction at word 4
+    writes(f, "hello\0\0\0")            # word 3, static data
+    writes(f, "\11\2\70\0\0\0\0\0")     # word 4, PUSH IMM 56, func entry pt 56
+    writes(f, "\13\2\0\0\0\0\0\0")      # word 5, call 0
+    writes(f, "\1\0\0\0\0\0\0\0")       # word 6, halt
+    writes(f, "\11\2\377\377\377\377\377\377") # word 7, push IMM -1
+    writes(f, "\11\2\30\0\0\0\0\0")     # word 8, push IMM 24 "hello"
+    writes(f, "\13\2\1\0\0\0\0\0")      # word 9, call IMM 1
+    writes(f, "\14\2\0\0\0\0\0\0")      # word 10, ret IMM 0
+    close(f)
+end
