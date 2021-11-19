@@ -1,0 +1,5 @@
+link printf
+procedure main()
+   s := sprintf("0x%x", 5252)
+   write("s is ", s)
+end

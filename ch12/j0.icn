@@ -1,0 +1,260 @@
+link bincvt
+global yyfilename, yylineno, yycolno, yylval, parser, global_st, stringtab
+global labeltable, methodAddrPushed
+procedure main(argv)
+   j0 := j0()
+   serial := serial()
+   parser := Parser()
+   yyfilename := argv[1] | stop("usage: j0 filename")
+   if not (map(yyfilename[-5:0])==".java") then yyfilename ||:= ".java"
+   yyin := open(yyfilename) | stop("usage: j0 filename")
+   write("Compiling ", yyfilename, " to .j0 format")
+   yylineno := yycolno := 1
+   if yyparse() = 0 then
+      write("no errors")
+end
+class j0()
+   method lexErr(s)
+      stop(s, ": ", yytext) 
+   end
+   method scan(cat)
+      yylval := tree("token", cat, token(cat, yytext, yylineno, yycolno))
+      yycolno +:= *yytext
+      return cat
+   end
+   method whitespace()
+      yycolno +:= *yytext
+   end
+   method newline()
+      yylineno +:= 1; yycolno := 1
+   end
+   method comment()
+      yytext ? {
+         while tab(find("\n")+1) do newline()
+         yycolno +:= *tab(0)
+      }
+   end
+   method ord(s)
+      return proc("ord",0)(s[1])
+   end
+   method print(root)
+      root.print()
+   end
+   method node(s,r,p[])
+      rv := tree ! ([s,r] ||| p)
+      return rv
+   end
+   method semantic(root)
+   local out_st, System_st
+     global_st := symtab("global")
+     stringtab := symtab("strings")
+     System_st := symtab("class")
+     out_st := symtab("class")
+     out_st.insert("println", false, ,
+        methodtype([classtype("String")], typeinfo("void")))
+     System_st.insert("out", false, out_st, classtype("PrintStream",out_st))
+     global_st.insert("System", false, System_st, classtype("System",System_st))
+     if \verbose then write("making symbol tables")
+     root.mkSymTables(global_st)
+     root.populateSymTables()
+     if \verbose then write("checking symbol tables")
+     root.checkSymTables()
+     root.mkcls()
+     root.checktype()
+   end
+   method semErr(s)
+     stop("semantic error: ", s)
+   end
+   method calctype(t)
+     t.kids[1].calctype()
+     t.kids[2].assigntype(t.kids[1].typ)
+   end
+   method gencode(root)
+      root.genfirst()
+      root.genfollow()
+      root.gentargets()
+      root.gencode()
+
+      labeltable := table()
+      bcode := bytecode(root.icode)
+      genbytecode(bcode)
+   end
+
+  method bgen(o, a)
+    return [byc(o, a)]
+  end
+
+  method bytecode(icode)
+    if type(Op)=="procedure" then Op()
+    bcode := []
+    every i := 1 to *\icode do {
+      instr := icode[i]
+      case instr.op of {
+      "ADD": {
+        bcode |||:= j0.bgen(Op.PUSH, instr.op2) |||
+        j0.bgen(Op.PUSH, instr.op3) ||| j0.bgen(Op.ADD) |||
+        j0.bgen(Op.POP, instr.op1)
+      }
+      "SUB": { }
+      "NEG": {
+        bcode |||:= j0.bgen(Op.PUSH, instr.op2) |||
+          j0.bgen(Op.NEG) ||| j0.bgen(Op.POP, instr.op1)
+      }
+      "ASN": {
+        bcode |||:= j0.bgen(Op.PUSH, instr.op2) |||
+                    j0.bgen(Op.POP, instr.op1)
+      }
+      "ADDR": {
+        bcode |||:= j0.bgen(Op.LOAD, instr.op1)
+      }
+      "LCON": {
+        bcode |||:= j0.bgen(Op.LOAD, instr.op2) |||
+                    j0.bgen(Op.POP, instr.op1)
+      }
+      "SCON": {
+        bcode |||:= j0.bgen(Op.STORE, instr.op2) |||
+                    j0.bgen(Op.POP, instr.op1)
+      }
+      "GOTO": {
+        bcode |||:= j0.bgen(Op.GOTO, instr.op1)
+      }
+      "BLT": {
+        bcode |||:= j0.bgen(Op.PUSH, instr.op2) |||
+          j0.bgen(Op.PUSH, instr.op3) |||
+          j0.bgen(Op.LT) |||
+          j0.bgen(Op.BIF, instr.op1)
+      }
+      "PARM": {
+        if /methodAddrPushed then {
+          every j := i+1 to *icode do
+            if icode[j].op == "CALL" then {
+              if icode[j].op1 === "PrintStream__println" then {
+                bcode |||:= j0.bgen(Op.PUSH, address("imm", -1))
+              } else {
+                bcode |||:= j0.bgen(Op.PUSH, icode[j].op1)
+              }
+              break
+            }
+            methodAddrPushed := 1
+        }
+
+        bcode |||:= j0.bgen(Op.PUSH, instr.op1)
+      }
+      "CALL": {
+        bcode |||:= j0.bgen(Op.CALL, instr.op2)
+        methodAddrPushed := &null
+      }
+
+      "RETURN": {
+        bcode |||:= j0.bgen(Op.RETURN, instr.op1)
+      }
+      "RET": {
+         bcode |||:= j0.bgen(Op.RETURN, instr.op1)
+	 }
+
+      "proc": {
+         # record address
+         labeltable[instr.op1.region] := *bcode * 8
+        }
+      "end": { }
+      ".code": { }
+      ".global": { }
+      ".string": { }
+      "LAB": {
+         # record address
+         labeltable[instr.op1.offset] := *bcode * 8
+	 }
+      "string": {
+         # strings are written out separately
+	 }
+      "global": {
+         # globals are written out separately
+	 }
+      "FIELD": {
+         # compute a result in op1 that is obtained by computing on op2 and op3
+         # dummy placeholder for future object-orientation
+         bcode |||:= j0.bgen(Op.PUSH, instr.op2) ||| j0.bgen(Op.POP, instr.op1)
+	 }
+
+      default: {
+         stop("What is ", image(instr.op))
+         }
+         }
+      }
+     return bcode
+  end
+
+  # calculate the first instruction offset.  Count how many words of string
+  # constants there are
+  method calculate_fio()
+     return 3 + (stringtab.count / 8) + (global_st.count / 8)
+  end
+
+  # The string region always starts at offset 24 after the three-word header.
+  method write_stringarea(bc, fout)
+  local s
+    every s := !(stringtab.L) do {
+      # should fully-binarize (de-escape) string here
+      # for now, just strip double quotes, replace with NULs
+      s := s[2:-1] || "\0\0"
+
+      len := *s
+      while len > 0 do {
+         if len < 9 then {
+            writes(fout, s)
+            if len < 8 then writes(fout, repl("\0", 8-len))
+            }
+         else { writes(fout, s[1:9]); s := s[9:0] }
+         len -:= 8
+         }
+     }
+  end
+
+  method write_globalarea(bc, fout)
+    writes(fout, repl("\0", global_st.count))
+  end
+
+  method write_instructions(bc, fout)
+  local i #, offset := where(fout)-1
+     every i := 1 to *bc do {
+       case bc[i].op of {
+       Op.CODE: { }
+       Op.GLOBAL: { }
+       Op.LABEL: { }
+       Op.PROC: {  }
+       Op.STRING: {  }
+       Op.END: { }
+       default: {
+         bc[i].printb(fout)
+         }
+       }
+#    offset := where(fout)-1
+    }
+  end
+
+  method genbytecode(bc)
+    outfilename := yyfilename[1:find(".java", yyfilename)] || ".j0"
+    if fout := open(outfilename, "w") then {
+      writes(fout, "Jzero!!\0")		# word 0, magic word
+      writes(fout, "1.0\0\0\0\0\0")          # word 1, version #
+      # write the first instruction offset. convert Unicon binary to bcode binary
+      fio := calculate_fio(bc)
+      writes(fout, "\0\0", reverse(rawstring(fio, 6)))
+      write_stringarea(bc, fout)
+      write_globalarea(bc, fout)
+
+      #bootstrap instructions: push addr of main, push dummy self, call 0, and halt
+      codept := entrypt := fio*8+32
+      if not member(labeltable, "main") then stop("main() not found")
+      entrypt +:= labeltable["main"]
+      writes(fout, "\11\2",reverse(rawstring(entrypt, 6))) # PUSH IMM (func entry pt) fio*8+24
+      writes(fout, "\11\2\0\0\0\0\0\0")           # PUSH 0 (null self)
+      writes(fout, "\13\2\0\0\0\0\0\0")           # call 0
+      writes(fout, "\1\0\0\0\0\0\0\0")            # halt
+
+      write_instructions(bc, fout)
+      close(fout)
+    } else stop("couldn't open output file ",image(outfilename)," for writing")
+  end
+
+end

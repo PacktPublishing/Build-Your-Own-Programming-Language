@@ -1,0 +1,124 @@
+link signed
+class j0machine(code, ip, stack, data, finstr, sp, bp, hp, op, opr, opnd)
+  # loadbytecode at present returns everything after the first two-words of header
+  method loadbytecode(filename)
+    sz := stat(filename).size
+    f := open(filename) | stop("cannot open ", filename)
+    s := reads(f, sz) | stop("cannot read from ", filename)
+    close(f)
+    s ? {
+      if tab(find("Jzero!!\0001.0\0\0\0\0\0")) then {
+        return tab(0)
+        }
+      else stop("file ", filename, " is not a Jzero file")
+      }
+  end
+  method init(filename)
+    ip := 0
+    code := loadbytecode(filename) |
+      stop("cannot open program.j0")
+    Op()
+    ip := 16
+    ip := finstr := 8*getOpnd()
+    data := Data(code[25:ip+1])
+    stack := list()
+    bp := sp := 1
+  end
+  method fetch()
+    op := ord(code[1+ip]) | stop("can't get op at ", ip)
+    opr := ord(code[2+ip])
+    if opr ~= 0 then { opnd := getOpnd() }
+    ip +:= 8
+  end
+  method getOpnd()
+    return signed(reverse(code[ip+3+:6])) | stop("getOpnd failed")
+  end
+  method word(s)
+   local i := 0, j
+     every j := 8 to 1 by -1 do {
+       b := ord(s[j])
+       i := ishift(i, 8) + ord(b)
+     }
+   return i
+  end
+  method interp()
+    repeat {
+      fetch()
+      case (op) of {
+         Op.HALT: { stop("Execution completed.") }
+         Op.NOOP: {   }
+         Op.ADD: {
+           val1 := pop(stack); val2 := pop(stack)
+           push(stack, val1 + val2)
+           }
+         Op.PUSH: {
+           (val := deref(opr, opnd)) | stop("deref failed")
+           push(stack, val)
+           }
+         Op.POP: {
+           val := pop(stack)
+           assign(opnd, val)
+           }
+         Op.GOTO: {
+           ip := opnd
+           }
+         Op.BIF: {
+           if pop(stack)~=0 then
+             ip := opnd
+           }
+         Op.CALL: {
+           f := stack[2+opnd]
+           if f >= 0 then {
+             push( stack, ip) # save old ip
+             push( stack, bp) # save old ip
+             bp := *stack     # set new bp
+             ip := f          # set new ip
+             }
+           else if f = -1 then do_println()
+           else stop("no CALL defined for ", image(f))
+           }
+         Op.RETURN: {
+           while *stack > bp do pop(stack)
+           bp := pop(stack)
+           ip := pop( stack )
+           }
+
+         Op.LT: {  }
+         Op.LE: {  }
+         default: { stop("Illegal opcode ", op) }
+         }
+      }
+  end
+  method do_println()
+    # stack[1] is self. first arg is stack[2]
+    x := stack[2]
+    y := c_string(code[1+x:0])
+    write(y)
+  end
+  method c_string(s)
+    if i := find("\0", s) then return s[1:i]
+    else stop("no C string in ", image(s))
+  end
+  method assign(x, y)
+    # implement assign
+  end
+
+  method deref(reg, opd)
+    case reg of {
+      Op.R_ABS: {
+        if opd < finstr then return data.word(opd) | stop("datafail")
+        else return code[opd] | stop("codefail")
+        }
+      Op.R_IMM: { return opd }
+      Op.R_STACK: {
+         return stack[bp+opd/8] | stop("stackfail bp ", bp, " opd ", opd) }
+      default: { write("deref region ", reg); runerr(101, reg) }
+    }
+  end
+
+end
+class Data(d)
+  method word(o)
+    return d[1+o +: 8]
+  end
+end

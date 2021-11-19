@@ -1,0 +1,17 @@
+class address(region, offset)
+method regaddr()
+  return if region == "method" then "loc" else region
+end
+method str()
+  if region=="lab" then return "L"||offset
+  return regaddr() || ":" || offset
+end
+method print()
+  writes(str())
+end
+#initially
+#   if /region then {
+#write("when is it ever OK to make an address with no region?")
+#runerr(103, region)
+#	}
+end
