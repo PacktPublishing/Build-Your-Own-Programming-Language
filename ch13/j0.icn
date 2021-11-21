@@ -1,0 +1,507 @@
+link bincvt
+global yyfilename, yylineno, yycolno, yylval, parser, global_st, stringtab
+global labeltable, methodAddrPushed, regs, isNative, xcode
+procedure main(argv)
+   local off
+   j0 := j0()
+   serial := serial()
+   parser := Parser()
+   j0init(argv)
+   yylineno := yycolno := 1
+   off := 0
+   regs := [: RegUse("%rdi"|"%rsi"|"%rdx"|"%rcx"|"%r8"|
+            "%r9"|"%r10"|"%r11"|"%r12"|"%r13"|"%r14", off-:=8) :]
+
+   if yyparse() = 0 then
+      write("no errors")
+end
+procedure j0init(argv)
+   local fnam_idx := 1
+   if argv[1] == "-x64" then {
+      isNative := 1; fnam_idx +:= 1
+      write("Compiling ", argv[2], " to x64 .s format")
+   }
+   else write("Compiling ", argv[1], " to .j0 format")
+
+   if fnam_idx > *argv then stop("usage: j0 filename")
+   yyfilename := argv[fnam_idx]
+   if not (map(yyfilename[-5:0])==".java") then yyfilename ||:= ".java"
+   yyin := open(yyfilename) | stop("usage: j0 filename")
+end
+class j0()
+   method lexErr(s)
+      stop(s, ": ", yytext) 
+   end
+   method scan(cat)
+      yylval := tree("token", cat, token(cat, yytext, yylineno, yycolno))
+      yycolno +:= *yytext
+      return cat
+   end
+   method whitespace()
+      yycolno +:= *yytext
+   end
+   method newline()
+      yylineno +:= 1; yycolno := 1
+   end
+   method comment()
+      yytext ? {
+         while tab(find("\n")+1) do newline()
+         yycolno +:= *tab(0)
+      }
+   end
+   method ord(s)
+      return proc("ord",0)(s[1])
+   end
+   method print(root)
+      root.print()
+   end
+   method node(s,r,p[])
+      rv := tree ! ([s,r] ||| p)
+      return rv
+   end
+   method semantic(root)
+   local out_st, System_st
+     global_st := symtab("global")
+     stringtab := symtab("strings")
+     System_st := symtab("class")
+     out_st := symtab("class")
+     out_st.insert("println", false, ,
+        methodtype([classtype("String")], typeinfo("void")))
+     System_st.insert("out", false, out_st, classtype("PrintStream",out_st))
+     global_st.insert("System", false, System_st, classtype("System",System_st))
+     if \verbose then write("making symbol tables")
+     root.mkSymTables(global_st)
+     root.populateSymTables()
+     if \verbose then write("checking symbol tables")
+     root.checkSymTables()
+     root.mkcls()
+#     global_st.print()
+     root.checktype()
+   end
+   method semErr(s)
+     stop("semantic error: ", s)
+   end
+   method calctype(t)
+     t.kids[1].calctype()
+     t.kids[2].assigntype(t.kids[1].typ)
+   end
+   method gencode(root)
+      root.genfirst()
+      root.genfollow()
+      root.gentargets()
+      root.gencode()
+
+      labeltable := table()
+      methodAddrPushed := &null
+       if \isNative then {
+         xcode := x64code(root.icode)
+         genx64code(xcode)
+         }
+      else {
+         bcode := bytecode(root.icode)
+         genbytecode(bcode)
+         }
+   end
+
+  method xgen(o, src, dst)
+    return [x64(o, (loc(src)|&null), (loc(dst)|&null))]
+  end
+
+method x64code(icode)
+    xcode := [ ]
+    every i := 1 to *\icode do {
+       instr := icode[i]
+       case instr.op of {
+          "ADD": {
+            xcode |||:= xgen("movq", instr.op2, "%rax") |||
+                        xgen("addq", instr.op3, "%rax") |||
+                        xgen("movq", "%rax", instr.op1)
+           }
+          "SUB": { } # append translation of SUB to return val
+          "NEG": {
+             xcode |||:= xgen("movq", instr.op2, "%rax") |||
+                         xgen("negq", "%rax") |||
+                         xgen("movq", "%rax", instr.op1)
+             }
+          "ASN": {
+             xcode |||:= xgen("movq", instr.op2, "%rax") |||
+                         xgen("movq", "%rax", instr.op1)
+             }
+          "ADDR": {
+             xcode |||:= xgen("leaq", instr.op2, "%rax")
+             xcode |||:= xgen("%rax", instr.op1)
+             }
+          "LCON": {
+             xcode |||:= xgen("movq", instr.op2, "%rax") |||
+                         xgen("movq", "(%rax)", "%rax") |||
+                         xgen("movq", "%rax", instr.op1)
+             }
+          "SCON": {
+             xcode |||:= xgen("movq", instr.op2, "%rbx") |||
+                         xgen("movq", instr.op1, "%rax")
+                         xgen("movq", "%rbx", "(%rax)")
+             }
+          "GOTO": {
+             xcode |||:= xgen("goto", instr.op1)
+             }
+          "BLT": {
+             xcode |||:= xgen("movq", instr.op2, "%rax") |||
+                         xgen("cmpq", instr.op3, "%rax") |||
+                         xgen("jle", instr.op1)
+             }
+          "PARM": {
+             if /parmCount then {
+                parmCount := 1
+                every j := i+1 to *icode do
+                   if icode[j].op == "CALL" then break
+                parmCount +:= 1
+                }
+             else parmCount -:= 1
+             genParm(parmCount, instr.op1)
+            }
+          "CALL": {
+             xcode |||:= xgen("call", instr.op1)
+             if \(instr.op3) then
+                xcode |||:= xgen("movq", "%rax", instr.op2)
+             methodAddrPushed := &null
+             }
+          "RETURN"|"RET": {
+             if /(instr.op1) then
+               xcode |||:= xgen("movq", "$0", "%rax")
+             else
+               xcode |||:= xgen("movq", instr.op1, "%rax")
+             xcode |||:= xgen("leave")
+             xcode |||:= xgen("ret", instr.op1)
+             }
+          "proc": {
+             n := ((\(instr.op2)).intgr() + (\(instr.op3)).intgr()) * 8
+             xcode |||:= xgen(".text") | stop("something fails")
+             xcode |||:= xgen(".globl", instr.op1.region) | stop("something fails2")
+             xcode |||:= xgen(".def\t" || instr.op1.region ||
+			      ";\t.scl\t2;\t.type\t32;\t.endef") | stop("something fails3")
+             xcode |||:= xgen(".seh_proc\t"||instr.op1.region)
+             xcode |||:= xgen("lab", instr.op1.region)
+# Linux?
+#             xcode |||:= xgen(".type", instr.op1, "@function") | stop("something fails3")
+             xcode |||:= xgen("pushq", "%rbp") | stop("something fails5")
+             xcode |||:= xgen(".seh_pushreg\t%rbp")
+             xcode |||:= xgen("movq", "%rsp", "%rbp") | stop("something fails6")
+             xcode |||:= xgen(".seh_setframe\t%rbp, 0")
+             xcode |||:= xgen("subq", "$"||\n, "%rsp") | stop("something fails7")
+             xcode |||:= xgen(".seh_stackalloc\t"||n)
+             xcode |||:= xgen(".seh_endprologue")
+             if instr.op1.region === "main" then
+                xcode |||:= xgen("call","__main")
+             every i := !((\(instr.op2)).intgr()) do
+               regs[i].loaded := regs[i].dirty := "true"
+             /i := 0
+             every j := i+1 to 11 do
+               regs[i].loaded := regs[i].dirty := "false"
+             }
+          "end": {
+             if xcode[-1].op ~== "ret" then
+                xcode |||:= xgen("leave") ||| xgen("ret")
+             xcode |||:= xgen(".seh_endproc")
+             }
+      ".code": {
+#	 xcode |||:= xgen(".text")
+	 }
+      ".global": {
+#         xcode |||:= xgen(".global")
+          }
+      ".string": {
+#           xcode |||:= xgen(".section\t.rdata,\"dr\"")
+          }
+      "LAB": {
+             every (!regs).save() # saveregs()?
+          if not match("strings:",instr.op1.str()) then {
+             xcode |||:= xgen("lab", instr.op1)
+             }
+             }
+      "string": {
+         # strings are written out separately
+	 }
+      "global": {
+         # globals are written out separately
+	 }
+      "FIELD": {
+         # compute a result in op1 that is obtained by computing on op2 and op3
+         # dummy placeholder for future object-orientation
+#         xcode |||:= xgen("push", instr.op2) |||
+#                     xgen("pop", instr.op1)
+	 }
+          default: { stop("don't handle op ", image(instr.op)) }
+         }
+      }
+   return xcode
+  end
+
+  method genParm(n, addr)
+   every xcode |||:= (!regs).save()
+
+   if n > 6 then xcode |||:= xgen("pushq", addr) # dubious
+   else {
+      if type(addr) == "address__state" & addr.region=="strings" then
+         popcode := "leaq"
+      else popcode := "movq"
+      xcode |||:= xgen(popcode, addr,
+         case n of {
+         1: "%rdi"; 2: "%rsi"; 3: "%rdx";
+         4: "%rcx"; 5: "%r8";   6: "%r9"
+         })
+      }
+  end
+
+  method bgen(o, a)
+    return [byc(o, a)]
+  end
+
+  method bytecode(icode)
+    if type(Op)=="procedure" then Op()
+    bcode := []
+    every i := 1 to *\icode do {
+      instr := icode[i]
+      case instr.op of {
+      "ADD": {
+        bcode |||:= j0.bgen(Op.PUSH, instr.op2) |||
+        j0.bgen(Op.PUSH, instr.op3) ||| j0.bgen(Op.ADD) |||
+        j0.bgen(Op.POP, instr.op1)
+      }
+      "SUB": { }
+      "NEG": {
+        bcode |||:= j0.bgen(Op.PUSH, instr.op2) |||
+          j0.bgen(Op.NEG) ||| j0.bgen(Op.POP, instr.op1)
+      }
+      "ASN": {
+        bcode |||:= j0.bgen(Op.PUSH, instr.op2) |||
+                    j0.bgen(Op.POP, instr.op1)
+      }
+      "ADDR": {
+        bcode |||:= j0.bgen(Op.LOAD, instr.op1)
+      }
+      "LCON": {
+        bcode |||:= j0.bgen(Op.LOAD, instr.op2) |||
+                    j0.bgen(Op.POP, instr.op1)
+      }
+      "SCON": {
+        bcode |||:= j0.bgen(Op.STORE, instr.op2) |||
+                    j0.bgen(Op.POP, instr.op1)
+      }
+      "GOTO": {
+        bcode |||:= j0.bgen(Op.GOTO, instr.op1)
+      }
+      "BLT": {
+        bcode |||:= j0.bgen(Op.PUSH, instr.op2) |||
+          j0.bgen(Op.PUSH, instr.op3) |||
+          j0.bgen(Op.LT) |||
+          j0.bgen(Op.BIF, instr.op1)
+      }
+      "PARM": {
+        if /methodAddrPushed then {
+          every j := i+1 to *icode do
+            if icode[j].op == "CALL" then {
+              if icode[j].op1 === "PrintStream__println" then {
+                bcode |||:= j0.bgen(Op.PUSH, address("imm", -1))
+              } else {
+                bcode |||:= j0.bgen(Op.PUSH, icode[j].op1)
+              }
+              break
+            }
+            methodAddrPushed := 1
+        }
+
+        bcode |||:= j0.bgen(Op.PUSH, instr.op1)
+      }
+      "CALL": {
+        bcode |||:= j0.bgen(Op.CALL, instr.op2)
+        methodAddrPushed := &null
+      }
+
+      "RETURN"|"RET": {
+         bcode |||:= j0.bgen(Op.RETURN, instr.op1)
+	 }
+
+      "proc": {
+         # record address
+         labeltable[instr.op1.region] := *bcode * 8
+        }
+      "end": { }
+      ".code": { }
+      ".global": { }
+      ".string": { }
+      "LAB": {
+         # record address
+         labeltable[instr.op1.offset] := *bcode * 8
+	 }
+      "string": {
+         # strings are written out separately
+	 }
+      "global": {
+         # globals are written out separately
+	 }
+      "FIELD": {
+         # compute a result in op1 that is obtained by computing on op2 and op3
+         # dummy placeholder for future object-orientation
+         bcode |||:= j0.bgen(Op.PUSH, instr.op2) ||| j0.bgen(Op.POP, instr.op1)
+	 }
+
+      default: {
+         stop("What is ", image(instr.op))
+         }
+       }
+     }
+     return bcode
+  end
+
+  # calculate the first instruction offset.  Count how many words of string
+  # constants there are
+  method calculate_fio()
+     return 3 + (stringtab.count / 8) + (global_st.count / 8)
+  end
+
+  # The string region always starts at offset 24 after the three-word header.
+  method write_stringarea(bc, fout)
+  local s
+    every s := !(stringtab.L) do {
+      # should fully-binarize (de-escape) string here
+      # for now, just strip double quotes, replace with NULs
+      s := s[2:-1] || "\0\0"
+
+      len := *s
+      while len > 0 do {
+         if len < 9 then {
+            writes(fout, s)
+            if len < 8 then writes(fout, repl("\0", 8-len))
+            }
+         else { writes(fout, s[1:9]); s := s[9:0] }
+         len -:= 8
+         }
+     }
+  end
+
+  method write_globalarea(bc, fout)
+    writes(fout, repl("\0", global_st.count))
+  end
+
+  method write_instructions(bc, fout)
+  local i #, offset := where(fout)-1
+     every i := 1 to *bc do {
+       case bc[i].op of {
+       Op.CODE: { }
+       Op.GLOBAL: { }
+       Op.LABEL: { }
+       Op.PROC: {  }
+       Op.STRING: {  }
+       Op.END: { }
+       default: {
+         bc[i].printb(fout)
+         }
+       }
+#    offset := where(fout)-1
+    }
+  end
+
+  method genbytecode(bc)
+    outfilename := yyfilename[1:find(".java", yyfilename)] || ".j0"
+    if fout := open(outfilename, "w") then {
+      writes(fout, "Jzero!!\0")		# word 0, magic word
+      writes(fout, "1.0\0\0\0\0\0")          # word 1, version #
+      # write the first instruction offset. convert Unicon binary to bcode binary
+      fio := calculate_fio(bc)
+      writes(fout, "\0\0", reverse(rawstring(fio, 6)))
+      write_stringarea(bc, fout)
+      write_globalarea(bc, fout)
+
+      #bootstrap instructions: push addr of main, push dummy self, call 0, and halt
+      codept := entrypt := fio*8+32
+      if not member(labeltable, "main") then stop("main() not found")
+      entrypt +:= labeltable["main"]
+      writes(fout, "\11\2",reverse(rawstring(entrypt, 6))) # PUSH IMM (func entry pt) fio*8+24
+      writes(fout, "\11\2\0\0\0\0\0\0")           # PUSH 0 (null self)
+      writes(fout, "\13\2\0\0\0\0\0\0")           # call 0
+      writes(fout, "\1\0\0\0\0\0\0\0")            # halt
+
+      write_instructions(bc, fout)
+      close(fout)
+    } else stop("couldn't open output file ",image(outfilename)," for writing")
+  end
+
+  method genx64code(xc)
+    outfilename := yyfilename[1:find(".java", yyfilename)] || ".s"
+    if fout := open(outfilename, "w") then {
+      write(fout, "\t.file\t\"", yyfilename, "\"")
+      # for now, write out our "runtime system" with every generated code
+      write(fout, "\t.text")
+      write(fout, "\t.globl\tPrintStream__println")
+      write(fout, "\t.def\tPrintStream__println;\t.scl\t2;\t.type\t32;\t.endef")
+      write(fout, "\t.seh_proc\tPrintStream__println")
+      write(fout, "PrintStream__println:")
+      write(fout, "\tpushq\t%rbp")
+      write(fout, "\t.seh_pushreg\t%rbp")
+      write(fout, "\tmovq\t%rsp, %rbp")
+      write(fout, "\t.seh_setframe\t%rbp, 0")
+      write(fout, "\tsubq\t$32, %rsp\n",
+	    "\t.seh_stackalloc\t32\n",
+	    "\t.seh_endprologue\n",
+	    "\tmovq\t%rsi, %rcx\n", # Windows conventions!
+	    "\tcall\tputs\n",
+	    "\tnop\n",
+	    "\taddq\t$32, %rsp\n",
+	    "\tpopq\t%rbp\n",
+	    "\tret\n",
+	    "\t.seh_endproc")
+      write(fout, "\t.text")
+      write(fout, "\t.def\t__main;\t.scl\t2;\t.type\t32;\t.endef")
+      write_x64strings(fout)
+      x64print(fout)
+      write(fout, "\t.ident\t\"j0: (Unicon) 0.1.0\"")
+      write(fout, "\t.def\tputs;\t.scl\t2;\t.type\t32;\t.endef")
+      close(fout)
+    } else stop("couldn't open output file ",image(outfilename)," for writing")
+  end
+
+  method write_x64strings(fout)
+  local s
+    write(fout, "\t.section\t.rdata,\"dr\"")
+    every i := !*(stringtab.L) do {
+      s := stringtab.L[i]
+      write(fout, ".Lstr", i-1, ":")
+      s[-1] := "\\0\""
+      write(fout, "\t.ascii ",s)
+     }
+  end
+
+  method x64print(f:&output)
+    every (!xcode).print(f)
+  end
+
+   method loc(a)
+     if /a then return
+     if string(a) then return x64loc(a)
+     else case a.region of {
+     "method"|
+     "loc": { if a.offset <= 88 then return loadreg(a)
+              else return x64loc("rbp", -a.offset) }
+     "glob": { return x64loc("rip", a.offset) }
+     "const": { return x64loc("imm", a.offset) }
+     "lab": { return x64loc("lab", a.offset) }
+     "obj": { return x64loc("r15", a.offset) }
+     "imm": { return x64loc("imm", a.offset) }
+     "strings": { return x64loc("%rip", ".Lstr"||a.offset) }
+     default: {
+#write("no loc for ", image(a.region), " offset ", image(a.offset))
+        return x64loc("lab", a.region)
+        }
+     }
+   end
+  method loadreg(a)
+    r := a.offset/8 + 1
+    if / (regs[r].loaded) then {
+      every put(xcode,
+               !xgen("movq",(-a.offset)||"(%rbp)",regs[r].reg))
+      regs[r].loaded := "true"
+      }
+    return x64loc(regs[a.offset/8+1].reg)
+  end
+
+end

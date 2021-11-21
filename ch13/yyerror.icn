@@ -1,0 +1,4 @@
+procedure yyerror(s)
+    writes(&errout, yylineno, ": ", image(yytext),": ")
+    stop(s)
+end

@@ -1,0 +1,56 @@
+class Op(HALT, NOOP, ADD, SUB, MUL, DIV, MOD, NEG, PUSH, POP, CALL, RETURN,
+	 GOTO, BIF, LT, LE, GT, GE, EQ, NEQ, LOCAL, LOAD, STORE,
+	 LABEL, STRING, CODE, PROC, GLOBAL, END,
+	 R_NONE, R_ABS, R_IMM, R_STACK, R_HEAP)
+initially
+  HALT := 1;  NOOP := 2; ADD := 3; SUB := 4; MUL := 5
+  DIV := 6; MOD := 7; NEG := 8; PUSH := 9; POP := 10
+  CALL := 11; RETURN := 12; GOTO := 13; BIF := 14; LT := 15
+  LE := 16; GT := 17; GE := 18; EQ := 19; NEQ := 20;
+  LOCAL := 21; LOAD := 22; STORE := 23;
+  LABEL := 101; STRING:=102; CODE:=103; PROC:=104; GLOBAL := 105; END := 106
+  R_NONE := 0; R_ABS := 1; R_IMM := 2
+  R_STACK := 3; R_HEAP := 4
+  Op := self
+end
+
+procedure OpStr(i)
+   if type(Op)~=="Op__state" then Op()
+   case i of {
+       Op.HALT: return "HALT"
+       Op.NOOP: return "NOOP"
+       Op.ADD:  return "ADD"
+       Op.SUB:  return "SUB"
+       Op.MUL:  return "MUL"
+       Op.DIV:  return "DIV"
+       Op.MOD:  return "MOD"
+       Op.NEG:  return "NEG"
+       Op.PUSH: return "PUSH"
+       Op.POP:  return "POP"
+       Op.CALL: return "CALL"
+       Op.RETURN: return "RETURN"
+       Op.GOTO: return "GOTO"
+       Op.BIF: return "BIF"
+       Op.LT: return "LT"
+       Op.LE: return "LE"
+       Op.GT: return "GT"
+       Op.GE: return "GE"
+       Op.EQ: return "EQ"
+       Op.NEQ: return "NEQ"
+       Op.LOCAL: return "LOCAL"
+       Op.LOAD: return "LOAD"
+       Op.STORE: return "STORE"
+       default: return "(unknown:"||image(i)||")"
+   }
+end
+
+procedure OpRStr(opr)
+   if type(Op)~=="Op__state" then Op()
+   case opr of {
+     Op.R_NONE: return "NONE"
+     Op.R_ABS:  return "ABS"
+     Op.R_IMM:  return "IMM"
+     Op.R_STACK: return "STACK"
+     Op.R_HEAP: return "HEAP"
+   }
+end

@@ -1,0 +1,37 @@
+class typeinfo(basetype)
+   method str()
+      return string(basetype)|"unknown"
+   end
+end
+class arraytype : typeinfo(element_type)
+   method str()
+      return "array of " || (\element_type).str()
+   end
+initially
+   basetype := "array"
+end
+class methodtype : typeinfo(parameters,return_type)
+   method str()
+      s := "method " || ((\return_type).str()|"undef") || "("
+      every s ||:= (!parameters).str() do s ||:= ","
+      s[-1] := ")"
+      return s
+   end
+initially
+   basetype := "method"
+   /parameters := []
+   /return_type := typeinfo("void")
+end
+class classtype : typeinfo(name, st, fields, methods, constrs)
+   method str()
+      return name
+   end
+initially
+   basetype := "class"
+   /st := symtab("class",global_st)
+   /fields := []
+   /methods := []
+   /constrs := []
+end
+class parameter(name, element_type)
+end
