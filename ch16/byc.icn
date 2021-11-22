@@ -1,0 +1,73 @@
+link printf
+class byc(op, opreg, opnd)
+  method print(f:&output)
+    write(f, "\t", nameof(), " ", addrof()) |
+      write(&errout, "can't print ", image(self), " op ", image(op))
+  end
+  method nameof()
+   static opnames
+   initial opnames := table(Op.HALT, "halt", Op.NOOP, "noop",
+      Op.ADD, "add", Op.SUB, "sub", Op.MUL, "mul",
+      Op.DIV, "div", Op.MOD, "mod", Op.NEG, "neg",
+      Op.PUSH, "push", Op.POP, "pop", Op.CALL, "call",
+      Op.RETURN, "return", Op.GOTO, "goto", Op.BIF, "bif",
+      Op.LT, "lt", Op.LE, "le", Op.GT, "gt", Op.GE, "ge",
+      Op.EQ, "eq", Op.NEQ, "neq", Op.LOCAL, "local",
+      Op.LOAD, "load", Op.STORE, "store", Op.LABEL, "LABEL",
+      Op.STRING, "STRING", Op.CODE, "CODE", Op.PROC, "PROC",
+      Op.GLOBAL, "GLOBAL", Op.END, "END")
+   return opnames[op]
+  end
+  method addrof()
+   case opreg of {
+      Op.R_NONE | &null: return ""
+      Op.R_ABS: return "@" || sprintf("%x",opnd)
+      Op.R_IMM: return string(opnd)
+      Op.R_STACK: return "stack:" || opnd
+      Op.R_HEAP: return "heap:" || opnd
+      default: {
+        return string(opreg) || ":" || opnd
+        }
+      }
+  end
+
+  method printb(f:&output)
+   writes(f, char(op), char(\opreg|0))
+   x := (\opnd | 0)
+   every !6 do {
+     writes(f, char(iand(x, 255)))
+     x := ishift(x, -8)
+     }
+  end
+  method addr(a)
+   if /a then opreg := Op.R_NONE
+   else if type(a) == "integer" then {
+     opreg := Op.R_IMM; opnd := a
+   }
+   else if type(a) == "string" then {
+     if not (sa := stringtab.lookup(a)) then write("don't know ", image(a))
+       # string region addresses are just pointers offset 24 from start
+       opreg := Op.R_IMM; opnd := sa.addr.offset + 24
+   }
+   else case a.region of {
+   "method": { opreg := Op.R_STACK; opnd := a.offset }
+   "global": { opreg := Op.R_ABS; opnd := a.offset + stringtab.count }
+   "const": { opreg := Op.R_ABS; opnd := a.offset }
+   "lab": { opreg := Op.R_ABS; opnd := a.offset }
+   "obj": { opreg := Op.R_HEAP; opnd := a.offset }
+   "imm": { opreg := Op.R_IMM; opnd := a.offset }
+   "strings": { opreg := Op.R_IMM; opnd := a.offset + 24 }
+   default: {
+      write("system error. region ", image(a.region),
+                         " offset ", image(a.offset))
+      runerr(103, a.region)
+      }
+   }
+  end
+initially(o, a)
+  op := o; addr(a);  # addr(\a);?
+  if type(nameof()) ~== "string" then {
+     write(&errout, "bad op ", image(op))
+     runerr(103, op)
+  }
+end

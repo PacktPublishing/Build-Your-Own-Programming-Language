@@ -1,0 +1,9 @@
+class symtab_entry(sym,parent_st,st,isConst,typ,addr)
+  method print(level:0)
+    writes(repl(" ",level), sym)
+    if \isconst then writes(" (const)")
+    if \typ then writes(" ", typ.str())
+    write()
+    (\st).print(level+1);
+  end
+end

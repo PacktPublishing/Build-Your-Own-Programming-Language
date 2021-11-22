@@ -1,0 +1,12 @@
+class RegUse (reg, offset, loaded, dirty)
+   method load()
+      if \loaded then fail
+      loaded := 1
+      return j0.xgen("movq", offset||"(%rbp)", reg)
+   end
+   method save()
+      if /dirty then fail
+      dirty := &null
+      return j0.xgen("movq", reg, offset||"(%rbp)")
+   end
+end
