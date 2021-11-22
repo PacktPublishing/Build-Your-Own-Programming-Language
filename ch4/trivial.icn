@@ -1,13 +1,14 @@
 procedure main(argv)
-   trivial := trivial()
    yyin := open(argv[1])
+   lexer := lexer()
+   Parser := Parser()
    if yyparse() = 0 then write("No errors")
-end
-class trivial()
-   method synErr(s)
-      stop(s, ": ", yytext)
-   end
 end
 procedure yyerror(s)
     stop(s)
+end
+class lexer()
+   method lexErr(s)
+      stop("lexical error: ", s)
+   end
 end

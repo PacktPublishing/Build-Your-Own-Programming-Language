@@ -1,5 +1,5 @@
-### This file created by IYACC 1.0
-### Please send bug reports to raypereda@hotmail.com
+### This file created by IYACC 1.1
+### Please send bug reports to jeffery@cs.nmt.edu
 #define YYPREFIX "yy"
 $define NAME 257
 $define NUMBER 258

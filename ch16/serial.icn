@@ -1,7 +1,0 @@
-class serial(serialno)
-   method getid()
-      serialno +:= 1; return serialno
-   end
-initially
-    serialno := 0
-end

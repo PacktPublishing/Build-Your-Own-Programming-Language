@@ -5,15 +5,16 @@ procedure main(argv)
    yyin := open(argv[1]) | stop("usage: j0 filename")
    yylineno := yycolno := 1
    if yyparse() = 0 then
-      write("no errors")
+      write("no errors, ", j0.count, " tokens parsed")
 end
-class j0()
+class j0(count)
    method lexErr(s)
       stop(s, ": ", yytext) 
    end
    method scan(cat)
       yylval := token(cat, yytext, yylineno, yycolno)
       yycolno +:= *yytext
+      count +:= 1
       return cat
    end
    method whitespace()
@@ -31,6 +32,8 @@ class j0()
    method ord(s)
       return proc("ord",0)(s[1])
    end
+initially
+   count := 0
 end
 class token(cat, text, lineno, colno, ival, dval, sval)
    method deEscape(sin)

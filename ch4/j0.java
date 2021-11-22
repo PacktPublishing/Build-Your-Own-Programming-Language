@@ -3,16 +3,18 @@ import java.io.FileReader;
 public class j0 {
    public static Yylex yylexer;
    public static ch4.parser par;
+    public static int yylineno, yycolno, count;
    public static void main(String argv[]) throws Exception {
       init(argv[0]);
       par = new ch4.parser();
       //      par.yydebug=true;
-      yylineno = 1;
+      yylineno = yycolno = 1;
+      count = 0;
       int i = par.yyparse();
       if (i == 0)
-         System.out.println("no errors");
+         System.out.println("no errors, " + j0.count +
+			    "tokens parsed");
    }
-   public static int yylineno;
     //   public static parserVal yylval;
    public static void init(String s) throws Exception {
       yylexer = new Yylex(new FileReader(s));
@@ -35,7 +37,8 @@ public class j0 {
       System.exit(1);
    }
    public static int scan(int cat) {
-      ch4.j0.par.yylval = new parserVal(new token(cat, yytext(), yylineno));
+      ch4.j0.par.yylval = new parserVal(
+				new token(cat, yytext(), yylineno, yycolno));
       return cat;
    }
    public static void newline() {

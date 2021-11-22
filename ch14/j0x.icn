@@ -1,8 +1,0 @@
-procedure main(argv)
-  if not (filename := argv[1]) then
-    stop("usage: j0x file[.j0]")
-  if not (filename[-3:0] == ".j0") then filename ||:= ".j0"
-  j0machine := j0machine()
-  j0machine.init(filename)
-  j0machine.interp()
-end

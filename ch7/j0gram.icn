@@ -730,7 +730,7 @@ procedure action_41()
 
   yyval:=j0.node("LocalVarDecl",1140,valstk[2],valstk[1]);
   j0.calctype(yyval);
- 
+  
 end
 
 procedure action_55()
