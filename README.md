@@ -43,10 +43,10 @@ With the following software and hardware list you can run all code files present
 | -------- | ------------------------------------ | ----------------------------------- |
 | 3-16 | Uflex, Jflex, Unicon, Java | Windows, Mac OS X, and Linux (Any) |
 
+We also provide a PDF file that has color images of the screenshots/diagrams used in this book. [Click here to download it](https://static.packt-cdn.com/downloads/9781800204805_ColorImages.pdf).
+
 ## Code in Action
 The Code in Action videos for this book can be viewed at https://bit.ly/3njc15D.
-
-We also provide a PDF file that has color images of the screenshots/diagrams used in this book. [Click here to download it](https://static.packt-cdn.com/downloads/9781800204805_ColorImages.pdf).
 
 ### Related products
 * Supercharge Your Applications with GraalVM  [[Packt]](https://www.packtpub.com/product/supercharge-your-applications-with-graalvm/9781800564909?utm_source=github&utm_medium=repository&utm_campaign=9781800564909) [[Amazon]](https://www.amazon.com/dp/1800564902)
